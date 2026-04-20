@@ -1,0 +1,37 @@
+# build + packaging
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# venv
+.venv/
+venv/
+env/
+
+# testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# jupyter
+.ipynb_checkpoints/
+
+# type checkers
+.mypy_cache/
+.ruff_cache/
+
+# private notes (never commit)
+INTERNAL/
+private/
