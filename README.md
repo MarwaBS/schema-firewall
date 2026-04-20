@@ -10,6 +10,8 @@ pip install schema-firewall
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+> **Production usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.0` in `requirements.txt` and re-validates the firewall integration in its `External Benchmark` CI job on every push. Directional coupling signal (pinned dep + consuming CI), not a semantic contract invariant.
+
 ---
 
 ## The problem
