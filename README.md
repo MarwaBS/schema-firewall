@@ -80,6 +80,22 @@ If you've ever applied `.mean()`, `.value_counts()`, `TargetEncoder`, or ComBat/
 
 ---
 
+## Verified invariants under execution
+
+The library is in production use today as a pinned dep of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor). The flagship's `External Benchmark` CI job re-checks these invariants against the published wheel on every push to `main`:
+
+- **Statistical leakage detection triggers on the bundled California housing demo.** Build a target-mean-encoded feature on rounded lat/lon buckets — Ridge regression returns R² = 0.9495 (leaky). Apply the same target encoding per train fold only — R² collapses to 0.4384 (honest). Both `check_leakage` and `check_stateless` raise on the leaky pipeline. Reproducible in 60 seconds via [`examples/leakage_demo.ipynb`](examples/leakage_demo.ipynb).
+
+- **Statelessness holds under subset perturbation.** `check_stateless` runs the user pipeline on the full frame, then on a one-row subset. Any transform whose per-row output depends on other rows (frequency encoders, target-mean encoders, ComBat-style global normalisation) fails this invariant by construction. Default samples five spread indices to avoid being fooled by a singleton-group row 0.
+
+- **Forbidden-column gate raises on the documented set.** `nyc-real-estate-predictor` configures `SchemaContract(forbidden_columns=frozenset({"SALE PRICE", "SALE DATE", "PRICE_PER_SQFT", "TARGET", "log_price"}))`. The 18-test adversarial suite in the flagship asserts that `check_schema` raises on each of these columns presented under several disguises.
+
+- **Determinism check catches non-deterministic transforms.** Two consecutive `pipeline_fn(raw)` calls must produce identical frames. Unseeded random initialisation, dict-order dependency, and side-effecting transforms all fail. Internal `pd.testing.assert_frame_equal`.
+
+These hold across the test matrix; numbers (test counts, coverage %) age — the invariants don't.
+
+---
+
 ## What this is NOT
 
 - Not a replacement for train/test splitting, cross-validation, or sklearn `Pipeline`.
