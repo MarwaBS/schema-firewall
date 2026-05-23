@@ -6,6 +6,7 @@
 pip install schema-firewall
 ```
 
+[![CI](https://github.com/MarwaBS/schema-firewall/actions/workflows/python-package.yml/badge.svg)](https://github.com/MarwaBS/schema-firewall/actions/workflows/python-package.yml)
 [![PyPI](https://img.shields.io/pypi/v/schema-firewall.svg)](https://pypi.org/project/schema-firewall/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
