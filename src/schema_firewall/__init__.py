@@ -17,6 +17,8 @@ Public API (three checks, one contract, four exceptions):
 Each check raises on failure and returns None on pass. No truthy/falsy
 return values, no silent degradation, no runtime config side effects.
 """
+from importlib import metadata as _metadata
+
 from ._checks import check_leakage, check_schema, check_stateless
 from ._exceptions import (
     LeakageError,
@@ -26,7 +28,13 @@ from ._exceptions import (
 )
 from ._schema import SchemaContract
 
-__version__ = "0.1.0"
+try:
+    __version__ = _metadata.version("schema-firewall")
+except _metadata.PackageNotFoundError:
+    # Editable source clone without `pip install -e .`. Should not occur
+    # in released wheels; the literal here is a "not a real release"
+    # sentinel rather than a stale version that drifts from pyproject.
+    __version__ = "0.0.0+local"
 
 __all__ = [
     "__version__",
