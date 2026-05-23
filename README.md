@@ -109,7 +109,7 @@ Three checks. One contract class. Four exceptions. That's the whole library.
 
 ## Design constraints (locked)
 
-- **≤ 500 LoC** of core implementation. Actual: ~305.
+- **≤ 500 LoC** of core implementation. Actual: 344 lines (raw) / 270 lines (excluding blanks + comments).
 - **3 public check functions** — `check_leakage`, `check_schema`, `check_stateless`. No more.
 - **27 adversarial tests** covering every documented failure mode above.
 - **Three dependencies:** `numpy`, `pandas`, `scikit-learn`. Nothing else.
