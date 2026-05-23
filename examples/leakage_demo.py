@@ -114,7 +114,11 @@ def catch_leak_via_leakage_check() -> None:
         print("  CAUGHT: check_leakage raised LeakageError")
         print(f"  detail: {str(exc).splitlines()[1][:110]}")
         return
-    print("  note: check_leakage did not trip; check_stateless is the right tool here")
+    raise AssertionError(
+        "README documents that check_leakage raises LeakageError on the "
+        "leaky region-mean feature, but it did not. Check sklearn version "
+        "drift or default threshold values in _checks.py."
+    )
 
 
 # ─────────────────────────────────────────────────────────────────
