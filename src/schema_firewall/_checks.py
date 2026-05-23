@@ -17,7 +17,7 @@ from ._exceptions import LeakageError, SchemaError, StatelessnessError
 from ._schema import SchemaContract
 
 
-# ─── Public: leakage detection ───────────────────────────────────────
+# --- Public: leakage detection ---------------------------------------
 
 def check_leakage(
     X: pd.DataFrame,
@@ -30,15 +30,15 @@ def check_leakage(
 
     Runs three complementary detectors per numeric column:
 
-    - Pearson |r|  > ``max_abs_corr`` → linear leakage
-    - Spearman |ρ| > ``max_abs_corr`` → monotonic leakage (catches
+    - Pearson |r|  > ``max_abs_corr`` -> linear leakage
+    - Spearman |rho| > ``max_abs_corr`` -> monotonic leakage (catches
       log-transforms, rank re-encodings, expm1-of-log, etc.)
-    - normalised mutual information > ``mi_threshold`` → general,
+    - normalised mutual information > ``mi_threshold`` -> general,
       including non-monotonic, dependency
 
     MI is normalised by the target's histogram-based Shannon entropy,
     giving a scale-free ratio in [0, 1]. The default thresholds are
-    conservative — they flag features that are almost certainly
+    conservative -- they flag features that are almost certainly
     target-derived. Tune for your domain.
 
     Raises:
@@ -91,17 +91,17 @@ def check_leakage(
         )
 
 
-# ─── Public: schema contract validation ──────────────────────────────
+# --- Public: schema contract validation ------------------------------
 
 def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
     """Validate X against ``contract``.
 
     Failure modes, in order:
 
-    1. Any ``forbidden_columns`` entry is present in X → SchemaError.
-    2. Any ``required_columns`` entry is missing from X → SchemaError.
+    1. Any ``forbidden_columns`` entry is present in X -> SchemaError.
+    2. Any ``required_columns`` entry is missing from X -> SchemaError.
     3. Any column listed in ``contract.dtypes`` has a mismatched
-       dtype → SchemaError.
+       dtype -> SchemaError.
     """
     present_forbidden = sorted(set(X.columns) & set(contract.forbidden_columns))
     if present_forbidden:
@@ -131,7 +131,7 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
             )
 
 
-# ─── Public: statelessness check ─────────────────────────────────────
+# --- Public: statelessness check -------------------------------------
 
 def check_stateless(
     pipeline_fn: Callable[[pd.DataFrame], pd.DataFrame],
@@ -149,13 +149,13 @@ def check_stateless(
        (default: first kept row), ``pipeline_fn`` applied to a
        one-row subset must produce the same output for that row as
        ``pipeline_fn(raw)`` did. This is a strictly harder constraint
-       than shuffling — mean-encoders, rank transforms, and
+       than shuffling -- mean-encoders, rank transforms, and
        frequency encoders all fail it because their output for a
        given row depends on the rest of the dataset.
 
     Catches:
 
-    - Santander-style frequency encoding across (train ∪ test).
+    - Santander-style frequency encoding across (train union test).
     - Target encoding fit on full data instead of per-fold.
     - ComBat / global normalisation applied outside cross-validation.
     - Any non-deterministic transform (unseeded random, dict-order
@@ -212,7 +212,7 @@ def check_stateless(
             ) from exc
 
 
-# ─── Internal helpers ────────────────────────────────────────────────
+# --- Internal helpers ------------------------------------------------
 
 def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: str) -> float:
     a = np.asarray(a, dtype=float)
