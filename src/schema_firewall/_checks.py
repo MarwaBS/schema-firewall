@@ -208,7 +208,7 @@ def check_stateless(
         except AssertionError as exc:
             raise StatelessnessError(
                 f"pipeline is state-dependent at index {idx!r} "
-                f"(one-row subset ≠ same row from full frame):\n  {exc}"
+                f"(one-row subset != same row from full frame):\n  {exc}"
             ) from exc
 
 
