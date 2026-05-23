@@ -1,10 +1,10 @@
 """
-Target-encoding leak demo — California housing
+Target-encoding leak demo -- California housing
 ================================================
 
 A short, self-contained script that reproduces one of the most common
 ML production bugs: computing a group-mean target encoding on the FULL
-dataset (train + test) before splitting. The model's reported R²
+dataset (train + test) before splitting. The model's reported R^2
 looks solid. One call to ``check_stateless`` catches the leak.
 
 Run directly:
@@ -42,14 +42,14 @@ def _load() -> tuple[pd.DataFrame, pd.Series]:
     return df, raw.target.rename("price")
 
 
-# ─────────────────────────────────────────────────────────────────
-# Step 1 — the leaky pipeline.
+# -----------------------------------------------------------------
+# Step 1 -- the leaky pipeline.
 #
 # Compute "region mean price" using the FULL dataset (including rows
 # that will later be the test split). Attach it as a feature. This
 # pattern appears all over production pipelines under names like
 # "neighborhood affluence index" or "area target encoding".
-# ─────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 
 def leaky_feature_engineering(df: pd.DataFrame, target: pd.Series) -> pd.DataFrame:
@@ -62,12 +62,12 @@ def leaky_feature_engineering(df: pd.DataFrame, target: pd.Series) -> pd.DataFra
 def _train_and_score(x_tr, x_te, y_tr, y_te, label: str) -> float:
     model = Ridge(alpha=1.0).fit(x_tr, y_tr)
     score = r2_score(y_te, model.predict(x_te))
-    print(f"  {label:<20s} R² = {score:.4f}")
+    print(f"  {label:<20s} R^2 = {score:.4f}")
     return score
 
 
 def run_leaky() -> float:
-    print("── leaky pipeline (region mean computed on full dataset) ──")
+    print("-- leaky pipeline (region mean computed on full dataset) --")
     df, y = _load()
     x_leaky = leaky_feature_engineering(df, y)
     x_tr, x_te, y_tr, y_te = train_test_split(
@@ -76,18 +76,18 @@ def run_leaky() -> float:
     return _train_and_score(x_tr, x_te, y_tr, y_te, "leaky")
 
 
-# ─────────────────────────────────────────────────────────────────
-# Step 2 — the schema-firewall catches it.
+# -----------------------------------------------------------------
+# Step 2 -- the schema-firewall catches it.
 #
 # check_stateless asserts that applying the feature pipeline to a
 # single-row subset produces the same output for that row as applying
 # it to the full frame. A target-mean-encoded feature fails this
 # invariant because the one-row mean is that row's own target.
-# ─────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 
 def catch_leak() -> None:
-    print("── schema-firewall running check_stateless ──")
+    print("-- schema-firewall running check_stateless --")
     df, y = _load()
 
     def pipeline_fn(frame: pd.DataFrame) -> pd.DataFrame:
@@ -100,11 +100,11 @@ def catch_leak() -> None:
         print("  CAUGHT: check_stateless raised StatelessnessError")
         print(f"  detail: {str(exc).splitlines()[0][:110]}")
         return
-    print("  FAIL: check_stateless did not raise — firewall missed the leak")
+    print("  FAIL: check_stateless did not raise -- firewall missed the leak")
 
 
 def catch_leak_via_leakage_check() -> None:
-    print("── schema-firewall running check_leakage on the leaky X ──")
+    print("-- schema-firewall running check_leakage on the leaky X --")
     df, y = _load()
     x_leaky = leaky_feature_engineering(df, y)
     x_leaky_numeric = x_leaky.select_dtypes(include=[np.number])
@@ -121,17 +121,17 @@ def catch_leak_via_leakage_check() -> None:
     )
 
 
-# ─────────────────────────────────────────────────────────────────
-# Step 3 — the correct pipeline.
+# -----------------------------------------------------------------
+# Step 3 -- the correct pipeline.
 #
 # Compute the region mean from train ONLY, then map onto both splits.
 # Unseen regions in the test split become NaN and must be handled
 # explicitly; the model's score is honest rather than inflated.
-# ─────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 
 def run_correct() -> float:
-    print("── correct pipeline (region mean computed on train only) ──")
+    print("-- correct pipeline (region mean computed on train only) --")
     df, y = _load()
     tr_idx, te_idx = train_test_split(df.index, test_size=0.25, random_state=0)
 
@@ -147,7 +147,7 @@ def run_correct() -> float:
     return _train_and_score(x_tr, x_te, y_tr, y_te, "honest")
 
 
-# ─────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def main() -> None:
     leaky_r2 = run_leaky()
@@ -158,14 +158,14 @@ def main() -> None:
     print()
     honest_r2 = run_correct()
     print()
-    print("── summary ──")
-    print(f"  leaky R²  = {leaky_r2:.4f}  (inflated by train+test target mean leak)")
-    print(f"  honest R² = {honest_r2:.4f}  (train-only region mean, unseen regions imputed)")
+    print("-- summary --")
+    print(f"  leaky R^2  = {leaky_r2:.4f}  (inflated by train+test target mean leak)")
+    print(f"  honest R^2 = {honest_r2:.4f}  (train-only region mean, unseen regions imputed)")
     print(f"  gap       = {leaky_r2 - honest_r2:+.4f}")
     print()
     print("  If you have applied .mean() / .groupby().transform('mean') /")
     print("  TargetEncoder / fit_transform on the full dataset before")
-    print("  cross-validation — you have probably shipped this bug.")
+    print("  cross-validation -- you have probably shipped this bug.")
 
 
 if __name__ == "__main__":
