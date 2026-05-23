@@ -36,6 +36,8 @@ dev = [
     "pytest>=8.0",
     "build>=1.0",
     "twine>=5.0",
+    "mypy>=1.11",
+    "ruff>=0.6",
 ]
 
 [project.urls]
@@ -52,3 +54,21 @@ schema_firewall = ["py.typed"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["pandas.*", "sklearn.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
