@@ -44,9 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operator.
 - Library docstrings and section-divider comments in
   `src/schema_firewall/_checks.py` contained additional non-ASCII
-  (arrows, Greek letters, set operators). `help(check_leakage)` and
-  similar introspection on cp1252 streams crashed. All replaced with
-  ASCII transliterations.
+  (arrows, Greek letters, set operators). Code that printed the
+  docstrings directly (e.g. `print(check_leakage.__doc__)`) crashed on
+  cp1252 streams; `help()` degraded silently by showing `→`-style
+  escape sequences instead of the actual character. All replaced with
+  ASCII transliterations (`->` for arrows, `rho` for Greek rho, `union`
+  for set-union, `--` for em-dashes).
 - Demo's `catch_leak_via_leakage_check` previously printed a soft
   "did not trip" note when `check_leakage` failed to catch the leak.
   Now raises `AssertionError` so the demo and CI fail loud if sklearn's
