@@ -137,6 +137,43 @@ def test_leakage_empty_numeric_frame_passes():
     check_leakage(x, y)  # no raise
 
 
+def test_leakage_handles_low_cardinality_classification_target():
+    """Regression test for the bug class motivating retracted Finding #1
+    in the 2026-05-23 audit.
+
+    The audit originally hypothesised that low-cardinality classification
+    targets (<= 5 unique values) would underflow the histogram-based
+    entropy denominator and cause a false-positive `LeakageError` on
+    every numeric feature. Verify-first (sprint #1) disproved that
+    mechanism: `p = p[p > 0]` filters empty bins before entropy is
+    computed, so y_entropy = log(n_unique) rather than zero.
+
+    This test pins that correct behavior so any future change to
+    `_shannon_entropy` or `mutual_info_regression` integration that
+    breaks classification targets fails the suite loudly."""
+    rng = np.random.default_rng(0)
+    n = 200
+
+    # 3-class balanced target.
+    y3 = pd.Series(rng.integers(0, 3, n), name="class")
+
+    # Independent features: no real dependency with y3.
+    x_independent = pd.DataFrame(
+        {
+            "a": rng.normal(0, 1, n),
+            "b": rng.uniform(0, 100, n),
+            "c": rng.integers(0, 1000, n),
+        }
+    )
+    check_leakage(x_independent, y3)  # no raise — was the bug class
+
+    # Target-copy feature: must still be caught even for low-cardinality y.
+    x_leaky = x_independent.copy()
+    x_leaky["target_copy"] = y3.to_numpy()
+    with pytest.raises(LeakageError, match="target_copy"):
+        check_leakage(x_leaky, y3)
+
+
 # ───────────────────────────────────────────────────────────────────
 # 2. check_schema
 # ───────────────────────────────────────────────────────────────────
