@@ -8,7 +8,7 @@ All logic is deterministic, stateless, and row-wise where applicable.
 """
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -213,7 +213,9 @@ def check_stateless(
 
 # --- Internal helpers ------------------------------------------------
 
-def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: str) -> float:
+def _safe_corr(
+    a: np.ndarray, b: np.ndarray, *, method: Literal["pearson", "spearman"]
+) -> float:
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     mask = np.isfinite(a) & np.isfinite(b)
@@ -226,7 +228,11 @@ def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: str) -> float:
         return float(np.corrcoef(a, b)[0, 1])
     if method == "spearman":
         return float(pd.Series(a).corr(pd.Series(b), method="spearman"))
-    raise ValueError(f"unknown correlation method: {method}")
+    # Reachable only from an untyped caller passing a bogus method name;
+    # typed callers are constrained by Literal at static time.
+    raise ValueError(
+        f"unknown correlation method {method!r}; expected 'pearson' or 'spearman'"
+    )
 
 
 def _shannon_entropy(x: np.ndarray, *, bins: int = 64) -> float:
