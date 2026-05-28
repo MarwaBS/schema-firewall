@@ -12,6 +12,7 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
+from sklearn.feature_selection import mutual_info_regression
 
 from ._exceptions import LeakageError, SchemaError, StatelessnessError
 from ._schema import SchemaContract
@@ -46,8 +47,6 @@ def check_leakage(
             detector's threshold. The message lists every violating
             column with all three metrics.
     """
-    from sklearn.feature_selection import mutual_info_regression
-
     numeric = X.select_dtypes(include=[np.number])
     if numeric.empty:
         return
