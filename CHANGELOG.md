@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-05-28
+
+Patch release closing 11 audit findings deferred from the 2026-05-23
+ledger. Includes one behavioral change (see below).
+
+### Added
+- Regression test pinning `check_leakage` behavior on low-cardinality
+  classification targets (3-class balanced y, N=200). Asserts the
+  function passes on independent features and raises `LeakageError`
+  on a target-copy feature. Closes the bug class that motivated
+  retracted Finding #1 in the audit. (#5)
+- Regression test asserting `check_stateless` raises `ValueError` when
+  a `sample_indices` entry is not in `raw.index`. (#9)
+- `CONTRIBUTING.md` at repo root: test-suite invocation, demo
+  invocation, issue routing, the minimalism-lock as a contribution
+  constraint, ASCII-source style note. (#25)
+
+### Changed
+- `_safe_corr` method parameter is now `Literal["pearson", "spearman"]`
+  rather than `str`, so mypy catches typo'd call sites at
+  static-analysis time. Runtime `ValueError` message tightened to
+  quote the bogus method and list valid options for the residual
+  untyped-caller case. (#27)
+- `mutual_info_regression` import moved from inside `check_leakage`
+  to the module-level imports of `_checks.py`. scikit-learn is a hard
+  dependency; the function-local form saved no install cost and added
+  an indirection per call. (#20)
+- `pyproject.toml` runtime dependencies gained upper bounds:
+  `numpy>=1.24,<3.0`, `pandas>=2.0,<3.0`, `scikit-learn>=1.3,<2.0`.
+  Protects downstream users from numpy 2.x ABI breaks and future
+  pandas/sklearn major bumps. Current dev versions remain in-range. (#11)
+- Demo `examples/leakage_demo.py` no longer slices the exception
+  message via `str(exc).splitlines()[N][:110]`. Now uses
+  `str(exc)[:200]` — decouples the demo output from `_checks.py`
+  exception-message line structure. (#13)
+- `examples/leakage_demo.ipynb` honest-path cell now operates on
+  `df_honest = df.copy()` so the leaky-path cell can be re-run
+  without contamination from a previously-executed honest cell. (#14)
+- README adversarial-test count: 27 -> 30 (verified via
+  `pytest --collect-only -q`).
+
+### Fixed
+- `examples/leakage_demo.ipynb` is now committed with executed
+  outputs. GitHub renders the demo's R^2 narrative inline
+  (leaky=0.9495 / honest=0.4384 / gap=+0.5111). (#21)
+
+### Behavioral changes
+- `check_stateless` raises `ValueError` on unknown `sample_indices`
+  entries, rather than silently skipping them. Previous behavior
+  let a caller's typo result in zero actual spot-checks and a
+  vacuous "pass". Callers who pass `sample_indices` should verify
+  every index is in `raw.index`. (#9)
+
 ## [0.1.1] - 2026-05-23
 
 ### Added
@@ -71,5 +124,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adversarial test suite (27 collected tests at release time).
 - MIT license.
 
-[0.1.1]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.0...HEAD
+[0.1.2]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/MarwaBS/schema-firewall/releases/tag/v0.1.0
