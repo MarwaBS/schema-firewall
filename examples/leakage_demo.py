@@ -98,7 +98,7 @@ def catch_leak() -> None:
         check_stateless(pipeline_fn, df)
     except StatelessnessError as exc:
         print("  CAUGHT: check_stateless raised StatelessnessError")
-        print(f"  detail: {str(exc).splitlines()[0][:110]}")
+        print(f"  detail: {str(exc)[:200]}")
         return
     print("  FAIL: check_stateless did not raise -- firewall missed the leak")
 
@@ -112,7 +112,7 @@ def catch_leak_via_leakage_check() -> None:
         check_leakage(x_leaky_numeric, y)
     except LeakageError as exc:
         print("  CAUGHT: check_leakage raised LeakageError")
-        print(f"  detail: {str(exc).splitlines()[1][:110]}")
+        print(f"  detail: {str(exc)[:200]}")
         return
     raise AssertionError(
         "README documents that check_leakage raises LeakageError on the "
