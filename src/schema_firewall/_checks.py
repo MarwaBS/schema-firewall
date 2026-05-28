@@ -195,7 +195,11 @@ def check_stateless(
 
     for idx in sample_indices:
         if idx not in raw.index:
-            continue
+            raise ValueError(
+                f"sample_indices contains {idx!r}, which is not in raw.index; "
+                f"every sample index must appear in raw so the spot-check has "
+                f"something to compare against"
+            )
         single_out = pipeline_fn(raw.loc[[idx]].copy())
         if len(single_out) == 0:
             continue

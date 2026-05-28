@@ -254,6 +254,23 @@ def test_stateless_propagates_pipeline_exceptions(clean_frame):
         check_stateless(broken, x)
 
 
+def test_stateless_raises_on_unknown_sample_index(clean_frame):
+    """0.1.2 behavioral change: unknown sample_indices is a caller bug,
+    not something to silently skip. Previously the loop did `continue`
+    and the check could pass on zero actual spot-checks if every index
+    was typo'd."""
+    x, _ = clean_frame
+
+    def stateless_pipeline(df):
+        out = df.copy()
+        out["sqft_doubled"] = out["sqft"] * 2
+        return out[["sqft_doubled"]]
+
+    bogus_index = 99999  # not in clean_frame's range (0..199)
+    with pytest.raises(ValueError, match="not in raw.index"):
+        check_stateless(stateless_pipeline, x, sample_indices=[bogus_index])
+
+
 # ───────────────────────────────────────────────────────────────────
 # 4. Package-level
 # ───────────────────────────────────────────────────────────────────
