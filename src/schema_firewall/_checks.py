@@ -6,9 +6,11 @@ carry diagnostic context in the exception message.
 
 All logic is deterministic, stateless, and row-wise where applicable.
 """
+
 from __future__ import annotations
 
-from typing import Callable, Literal
+from collections.abc import Callable
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -17,8 +19,8 @@ from sklearn.feature_selection import mutual_info_regression
 from ._exceptions import LeakageError, SchemaError, StatelessnessError
 from ._schema import SchemaContract
 
-
 # --- Public: leakage detection ---------------------------------------
+
 
 def check_leakage(
     X: pd.DataFrame,
@@ -54,9 +56,7 @@ def check_leakage(
     y_arr = np.asarray(y, dtype=float)
     y_entropy = _shannon_entropy(y_arr)
     if y_entropy <= 0:
-        raise LeakageError(
-            "target is constant or all-NaN; leakage check undefined"
-        )
+        raise LeakageError("target is constant or all-NaN; leakage check undefined")
 
     violations: list[str] = []
     for col in numeric.columns:
@@ -66,31 +66,20 @@ def check_leakage(
 
         pearson = abs(_safe_corr(feat, y_arr, method="pearson"))
         spearman = abs(_safe_corr(feat, y_arr, method="spearman"))
-        mi = float(
-            mutual_info_regression(
-                feat.reshape(-1, 1), y_arr, random_state=0
-            )[0]
-        )
+        mi = float(mutual_info_regression(feat.reshape(-1, 1), y_arr, random_state=0)[0])
         mi_norm = mi / y_entropy
 
-        if (
-            pearson > max_abs_corr
-            or spearman > max_abs_corr
-            or mi_norm > mi_threshold
-        ):
+        if pearson > max_abs_corr or spearman > max_abs_corr or mi_norm > mi_threshold:
             violations.append(
-                f"{col}: pearson={pearson:.3f} "
-                f"spearman={spearman:.3f} mi_norm={mi_norm:.3f}"
+                f"{col}: pearson={pearson:.3f} spearman={spearman:.3f} mi_norm={mi_norm:.3f}"
             )
 
     if violations:
-        raise LeakageError(
-            "target-correlated feature(s) detected:\n  "
-            + "\n  ".join(violations)
-        )
+        raise LeakageError("target-correlated feature(s) detected:\n  " + "\n  ".join(violations))
 
 
 # --- Public: schema contract validation ------------------------------
+
 
 def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
     """Validate X against ``contract``.
@@ -104,15 +93,11 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
     """
     present_forbidden = sorted(set(X.columns) & set(contract.forbidden_columns))
     if present_forbidden:
-        raise SchemaError(
-            f"forbidden column(s) present in X: {present_forbidden}"
-        )
+        raise SchemaError(f"forbidden column(s) present in X: {present_forbidden}")
 
     missing_required = sorted(set(contract.required_columns) - set(X.columns))
     if missing_required:
-        raise SchemaError(
-            f"required column(s) missing from X: {missing_required}"
-        )
+        raise SchemaError(f"required column(s) missing from X: {missing_required}")
 
     if contract.dtypes:
         dtype_violations: list[str] = []
@@ -121,16 +106,13 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
                 continue  # covered by required_columns check above
             actual = str(X[col].dtype)
             if actual != expected:
-                dtype_violations.append(
-                    f"{col}: expected {expected!r}, got {actual!r}"
-                )
+                dtype_violations.append(f"{col}: expected {expected!r}, got {actual!r}")
         if dtype_violations:
-            raise SchemaError(
-                "dtype violation(s):\n  " + "\n  ".join(dtype_violations)
-            )
+            raise SchemaError("dtype violation(s):\n  " + "\n  ".join(dtype_violations))
 
 
 # --- Public: statelessness check -------------------------------------
+
 
 def check_stateless(
     pipeline_fn: Callable[[pd.DataFrame], pd.DataFrame],
@@ -217,9 +199,8 @@ def check_stateless(
 
 # --- Internal helpers ------------------------------------------------
 
-def _safe_corr(
-    a: np.ndarray, b: np.ndarray, *, method: Literal["pearson", "spearman"]
-) -> float:
+
+def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: Literal["pearson", "spearman"]) -> float:
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     mask = np.isfinite(a) & np.isfinite(b)
@@ -234,9 +215,7 @@ def _safe_corr(
         return float(pd.Series(a).corr(pd.Series(b), method="spearman"))
     # Reachable only from an untyped caller passing a bogus method name;
     # typed callers are constrained by Literal at static time.
-    raise ValueError(
-        f"unknown correlation method {method!r}; expected 'pearson' or 'spearman'"
-    )
+    raise ValueError(f"unknown correlation method {method!r}; expected 'pearson' or 'spearman'")
 
 
 def _shannon_entropy(x: np.ndarray, *, bins: int = 64) -> float:

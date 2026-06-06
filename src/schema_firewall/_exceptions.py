@@ -4,6 +4,7 @@ Each exception class corresponds to one check function. Catching a
 specific subclass lets callers distinguish *what* failed, without
 string-matching on error messages.
 """
+
 from __future__ import annotations
 
 

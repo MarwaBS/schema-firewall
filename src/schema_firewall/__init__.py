@@ -17,6 +17,7 @@ Public API (three checks, one contract, four exceptions):
 Each check raises on failure and returns None on pass. No truthy/falsy
 return values, no silent degradation, no runtime config side effects.
 """
+
 from importlib import metadata as _metadata
 
 from ._checks import check_leakage, check_schema, check_stateless

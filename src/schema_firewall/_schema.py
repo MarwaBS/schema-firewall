@@ -1,4 +1,5 @@
 """SchemaContract — declarative input contract consumed by check_schema."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
