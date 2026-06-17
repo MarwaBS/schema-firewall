@@ -49,8 +49,9 @@ y: pd.Series     # your target
 # 1. Statistical leakage — Pearson + Spearman + adjusted mutual information.
 #    Pearson catches linear copies, Spearman monotonic transforms, and the
 #    chance-corrected MI catches NON-monotone and discrete deterministic leakage
-#    (y=x**2, |x|, cos(x), binary/k-class target encodings) that both
-#    correlations miss — while leaving honest noisy predictors alone. Needs
+#    (y=x**2, |x|, low-order oscillations, binary/k-class target encodings) that
+#    both correlations miss — while leaving honest noisy predictors alone.
+#    (High-frequency oscillatory encodings are a documented non-goal.) Needs
 #    >=100 rows. Raises LeakageError on fail.
 check_leakage(X, y)
 
