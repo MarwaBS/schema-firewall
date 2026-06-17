@@ -372,24 +372,30 @@ def test_leakage_rejects_non_numeric_target(clean_frame):
         check_leakage(x, y_str)
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2, 7])
 @pytest.mark.parametrize(
     "transform",
     [
         pytest.param(lambda v: v**2, id="square"),
         pytest.param(np.abs, id="abs"),
         pytest.param(lambda v: np.cos(3 * v), id="cos"),
+        pytest.param(lambda v: (v > 0).astype(float), id="binary"),
+        pytest.param(lambda v: np.digitize(v, [-0.5, 0.5]).astype(float), id="three-class"),
     ],
 )
-def test_leakage_catches_non_monotone_dependence(transform):
-    """The MI detector must catch NON-monotone deterministic leakage that
-    Pearson AND Spearman both miss (y = x**2, |x|, cos(3x)). The previous
-    self-MI normalisation was so deflated it missed all of these — the whole
-    point of having an MI pillar."""
-    rng = np.random.default_rng(0)
+def test_leakage_catches_non_monotone_dependence(transform, seed):
+    """The MI detector must catch NON-monotone / discrete deterministic leakage
+    that Pearson AND Spearman miss — y = x**2, |x|, cos(3x), AND binary/k-class
+    target encodings (the most common ML target shapes). The prior self-MI
+    normalisation missed all of these; quantile binning then silently collapsed
+    binary targets to one bin (AMI ≡ 0). Parametrised over seeds because a single
+    seed is exactly how the regression hid before."""
+    rng = np.random.default_rng(seed)
     x = rng.normal(size=300)
     leak = transform(x)
-    # Sanity: both linear and rank correlation are near zero here.
-    assert abs(np.corrcoef(x, leak)[0, 1]) < 0.2
+    # The point: ordinary correlation stays below the 0.95 default for all of
+    # these, so detection rests on the MI pillar.
+    assert abs(np.corrcoef(x, leak)[0, 1]) < 0.95
     with pytest.raises(LeakageError, match="leak"):
         check_leakage(pd.DataFrame({"safe": rng.normal(size=300), "leak": x}), pd.Series(leak))
 
@@ -407,13 +413,30 @@ def test_leakage_passes_legitimate_noisy_predictor():
 
 
 def test_leakage_small_sample_raises_clear_precondition():
-    """Below the minimum sample size, correlation/MI are noise-dominated (two
-    random points always correlate |r|=1). The check now raises a clear
-    ValueError precondition instead of a raw sklearn crash or a false leak."""
+    """Below the minimum sample size the binned MI is noise-dominated (and a
+    2-point correlation is always |r|=1), so there is no honest threshold. The
+    check raises a clear ValueError precondition instead of a raw sklearn crash
+    or a false positive/negative."""
     rng = np.random.default_rng(0)
-    for n in (2, 3, 4, 10, 25):
-        with pytest.raises(ValueError, match="at least 30 finite samples"):
+    for n in (2, 3, 4, 25, 50, 99):
+        with pytest.raises(ValueError, match="at least 100 finite samples"):
             check_leakage(pd.DataFrame({"f": rng.normal(size=n)}), pd.Series(rng.normal(size=n)))
+
+
+def test_stateless_rejects_duplicate_index():
+    """A non-unique index makes the per-row spot-check vacuous (raw.loc[[label]]
+    pulls every row sharing the label), so a global transform would pass. The
+    check now refuses a duplicate index instead of giving a false pass."""
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"sqft": rng.uniform(500, 3000, 200)}, index=[7] * 200)
+
+    def global_zscore(frame):
+        out = frame.copy()
+        out["z"] = (out["sqft"] - out["sqft"].mean()) / out["sqft"].std()
+        return out[["z"]]
+
+    with pytest.raises(StatelessnessError, match="duplicate"):
+        check_stateless(global_zscore, df)
 
 
 def test_stateless_catches_global_statistic_row_filter(clean_frame):
