@@ -110,9 +110,9 @@ Three checks. One contract class. Four exceptions. That's the whole library.
 
 ## Design constraints (locked)
 
-- **≤ 500 LoC** of core implementation. Actual: 344 lines (raw) / 270 lines (excluding blanks + comments).
+- **≤ 500 LoC** of core implementation across `src/schema_firewall/` — currently ~300 lines of code (~400 including blanks and comments), comfortably within budget.
 - **3 public check functions** — `check_leakage`, `check_schema`, `check_stateless`. No more.
-- **30 adversarial tests** covering every documented failure mode above.
+- **An adversarial test for every documented failure mode** (and a regression test for each fixed bug).
 - **Three dependencies:** `numpy`, `pandas`, `scikit-learn`. Nothing else.
 
 If `schema-firewall` v0.1 is missing a check you need, the library is wrong for your use case. Build the check in-line. v0.1 will not grow to absorb it.

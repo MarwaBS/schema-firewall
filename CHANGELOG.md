@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Audit-driven hardening (2026-06): fixes a crash, two incorrect/ineffective
+checks, and several error-handling and tooling gaps. Each fix carries a
+regression test.
+
+### Fixed
+- `check_leakage` no longer crashes with a raw sklearn `ValueError` on a single
+  NaN in any numeric feature or in the target; NaNs are dropped pairwise per
+  column before every metric.
+- `check_stateless` now fails (instead of silently skipping via `continue`) when
+  a row kept in the full-frame output is dropped when processed alone — the
+  false negative on global-statistic row filters like `df[df.x > df.x.median()]`.
+- Clear errors replace raw pandas `KeyError`s: spot-checking a row the pipeline
+  drops, and pipelines that reset/relabel the index, now raise messages naming
+  the actual precondition.
+- `check_schema` dtype comparison resolves equivalent spellings (`int64`, `i8`,
+  `<i8`) instead of rejecting them via raw string equality.
+- A non-numeric target to `check_leakage` raises a clear `LeakageError` rather
+  than a raw "could not convert string to float".
+
+### Changed
+- MI is normalised by the target's self-information `MI(y; y)` under the same
+  estimator, so `mi_norm` is genuinely in `[0, 1]` (a perfect copy → 1.0). The
+  previous histogram-Shannon-entropy denominator let it exceed 1 (~1.33) and
+  drift with the bin count; the `_shannon_entropy` helper was removed.
+- The example demo's `check_stateless` branch now exits non-zero if the check
+  misses the leak, so the README's "both checks raise" claim is enforced by
+  running the demo (and by `tests/test_demo.py`).
+
+### CI / tooling
+- CI runs `ruff check`, `ruff format --check`, and `mypy src` (matching the
+  CONTRIBUTING promise) and adds Python 3.13 to the matrix and classifiers.
+- Linting now covers `tests/` and `examples/` (previously excluded).
+
 ## [0.1.2] - 2026-05-28
 
 Patch release closing 11 audit findings deferred from the 2026-05-23
