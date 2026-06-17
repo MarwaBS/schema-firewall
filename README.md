@@ -48,9 +48,10 @@ y: pd.Series     # your target
 
 # 1. Statistical leakage — Pearson + Spearman + adjusted mutual information.
 #    Pearson catches linear copies, Spearman monotonic transforms, and the
-#    chance-corrected MI catches NON-monotone deterministic leakage (y=x**2,
-#    |x|, cos(x)) that both correlations miss — while leaving honest noisy
-#    predictors alone. Needs >=30 rows. Raises LeakageError on fail.
+#    chance-corrected MI catches NON-monotone and discrete deterministic leakage
+#    (y=x**2, |x|, cos(x), binary/k-class target encodings) that both
+#    correlations miss — while leaving honest noisy predictors alone. Needs
+#    >=100 rows. Raises LeakageError on fail.
 check_leakage(X, y)
 
 # 2. Schema contract — forbidden columns, required columns, dtypes.
