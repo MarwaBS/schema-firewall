@@ -20,6 +20,9 @@ regression test.
   `continue`), AND the default spot-check now includes each numeric column's
   extreme-value rows — so tail-only transforms (winsorise/clip/robust-scale,
   quantile filters) are caught deterministically instead of ~79% of the time.
+- `check_stateless` now spot-checks NaN-bearing rows too, so global-mean/median
+  imputation (`df.fillna(df.mean())`) — the canonical fit-on-full-data leak — is
+  caught even when the NaN sits off the min/max/stride sample.
 - `check_stateless` rejects a non-unique index (the per-row spot-check selects
   by label, so duplicate labels made it vacuous and a global transform passed).
 - `check_leakage` raises a clear `ValueError` below 100 finite samples (was a raw

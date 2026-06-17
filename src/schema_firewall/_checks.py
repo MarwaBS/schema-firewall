@@ -45,23 +45,27 @@ def check_leakage(
     - Pearson |r|  > ``max_abs_corr`` -> linear leakage
     - Spearman |rho| > ``max_abs_corr`` -> monotonic leakage (catches
       log-transforms, rank re-encodings, expm1-of-log, etc.)
-    - normalised mutual information > ``mi_threshold`` -> general dependency,
-      INCLUDING non-monotone relationships (``y = x**2``, ``y = |x|``,
-      ``y = cos(3x)``) that Pearson and Spearman both miss
+    - adjusted mutual information > ``mi_threshold`` -> non-monotone dependency
+      that Pearson and Spearman both miss: squares (``y = x**2``), absolute
+      values (``y = |x|``), low-order oscillations (``y = cos(3x)``), bucketing,
+      and BINARY / k-class target encodings (the most common ML target shapes)
 
-    The MI is a *discrete normalised mutual information*: both the feature and
-    the target are quantile-binned and scored with sklearn's
-    ``normalized_mutual_info_score(..., average_method="min")``. The result is a
-    single consistent estimator genuinely bounded in [0, 1] -- 1.0 when either
-    variable determines the other (a copy OR a deterministic non-monotone
-    transform), ~0 under independence. (A previous version divided a continuous
-    kNN MI estimate by a self-MI baseline; that estimator was so deflated it
-    only fired on an exact copy, so the MI detector caught nothing the linear/
-    rank detectors didn't -- the non-monotone case ``y = x**2`` slipped through.
-    The discrete NMI fixes that and also removes the small-``n`` crash the kNN
-    estimator raised for ``n <= n_neighbors``.) NaNs are dropped pairwise per
-    column before every metric, so a single missing value never crashes the
-    check.
+    The MI is sklearn's ``adjusted_mutual_info_score`` -- mutual information
+    corrected for chance -- on discretised values (low-cardinality values get one
+    bin each so binary/k-class targets are not collapsed; continuous values get
+    ``sqrt(n)`` quantile bins, capped at 16). Chance correction matters: it is ~0
+    under independence regardless of sample size or bin count, and ~1 when one
+    variable determines the other. This is what makes the MI detector catch
+    non-monotone leakage without false-positiving on honest noisy predictors,
+    which a plain (uncorrected) NMI does not. NaNs are dropped pairwise per
+    column, so a single missing value never crashes the check.
+
+    LIMITATION: the binned estimator resolves dependence up to a few oscillation
+    periods. A pathological *high-frequency* encoding (e.g. ``y = cos(5x)`` or a
+    sawtooth) puts several target values inside each feature bin and can evade
+    the MI detector. Such encodings are not a realistic leakage pattern and are
+    statistically indistinguishable from a strong honest predictor at finite
+    samples; do not rely on this detector for them.
 
     The target ``y`` must be numeric: all three detectors are defined on a
     continuous (or integer-encoded) target. Encode classification labels (e.g.
@@ -257,20 +261,28 @@ def check_stateless(
         )
 
     if sample_indices is None:
-        # Spot-check the EXTREME-value rows of every numeric column plus an even
-        # spread. A global-statistic transform (winsorise/clip/robust-scale,
-        # quantile filter) only edits tail rows, so a fixed-stride sample
-        # routinely misses it; the rows holding each column's min and max are
-        # exactly the ones such a transform touches. (Pass an explicit
-        # `sample_indices` to check more rows; checking every row is the
-        # strongest, at one pipeline call per row.)
+        # Spot-check the rows a global transform is most likely to touch:
+        #  - each numeric column's MIN and MAX rows — winsorise/clip/robust-scale
+        #    and quantile filters edit the tails;
+        #  - every row holding a NaN in any column — global-mean/median
+        #    imputation (df.fillna(df.mean())) edits exactly those, and a
+        #    one-row subset can't reconstruct the global statistic;
+        #  - an even fixed-stride spread for everything else.
+        # A plain stride sample routinely misses tail- or NaN-only edits. (Pass
+        # an explicit `sample_indices` to check more rows; checking every row is
+        # the strongest, at one pipeline call per row.)
         picks: list[Hashable] = []
-        kept_numeric = raw.loc[first.index].select_dtypes(include=[np.number])
+        kept = raw.loc[first.index]
+        kept_numeric = kept.select_dtypes(include=[np.number])
         for col in kept_numeric.columns:
             s = kept_numeric[col].dropna()
             if not s.empty:
                 picks.append(s.idxmin())
                 picks.append(s.idxmax())
+        # Rows with any missing value (imputation targets), capped so a
+        # NaN-heavy frame doesn't blow up the spot-check count.
+        nan_rows = kept.index[kept.isna().any(axis=1)]
+        picks.extend(nan_rows[:10])
         step = max(1, n // 5)
         picks.extend(first.index[i] for i in range(0, n, step))
         seen: set = set()

@@ -471,6 +471,26 @@ def test_stateless_catches_global_winsorizer(clean_frame):
         check_stateless(winsorize, x)
 
 
+def test_stateless_catches_global_mean_imputation():
+    """Global-mean imputation `df.fillna(df.mean())` is the canonical leakage
+    bug (fit on full data). The NaN row processed alone can't reconstruct the
+    global mean, so it diverges from the full-frame output — caught because the
+    default spot-check now includes NaN-bearing rows, even when the NaN sits off
+    the min/max/stride sample."""
+    rng = np.random.default_rng(0)
+    x = rng.uniform(0, 100, 200)
+    x[1] = np.nan  # a NaN at a non-extreme, off-stride row
+    df = pd.DataFrame({"x": x})
+
+    def mean_impute(frame):
+        out = frame.copy()
+        out["x"] = out["x"].fillna(out["x"].mean())
+        return out[["x"]]
+
+    with pytest.raises(StatelessnessError, match="state-dependent"):
+        check_stateless(mean_impute, df)
+
+
 def test_stateless_names_index_preservation_precondition(clean_frame):
     """An index-resetting pipeline used to surface as a confusing
     'sample_indices not in raw.index' error the caller never caused. It now
