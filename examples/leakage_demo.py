@@ -15,6 +15,7 @@ Or open the matching notebook:
 
     examples/leakage_demo.ipynb
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -70,9 +71,7 @@ def run_leaky() -> float:
     print("-- leaky pipeline (region mean computed on full dataset) --")
     df, y = _load()
     x_leaky = leaky_feature_engineering(df, y)
-    x_tr, x_te, y_tr, y_te = train_test_split(
-        x_leaky, y, test_size=0.25, random_state=0
-    )
+    x_tr, x_te, y_tr, y_te = train_test_split(x_leaky, y, test_size=0.25, random_state=0)
     return _train_and_score(x_tr, x_te, y_tr, y_te, "leaky")
 
 
@@ -100,7 +99,15 @@ def catch_leak() -> None:
         print("  CAUGHT: check_stateless raised StatelessnessError")
         print(f"  detail: {str(exc)[:200]}")
         return
-    print("  FAIL: check_stateless did not raise -- firewall missed the leak")
+    # Fail loudly (non-zero exit) rather than printing FAIL and continuing, so
+    # the README's "both check_leakage and check_stateless raise" claim is
+    # actually enforced by running the demo (and by tests/test_demo.py, which
+    # asserts exit code 0).
+    raise AssertionError(
+        "README documents that check_stateless raises StatelessnessError on the "
+        "leaky region-mean pipeline, but it did not -- the firewall missed the "
+        "leak. Check sklearn version drift or the check_stateless implementation."
+    )
 
 
 def catch_leak_via_leakage_check() -> None:
@@ -137,9 +144,7 @@ def run_correct() -> float:
 
     region_means = y.loc[tr_idx].groupby(df.loc[tr_idx, "region"]).mean()
     df["region_mean_price"] = df["region"].map(region_means)
-    df["region_mean_price"] = df["region_mean_price"].fillna(
-        region_means.mean()
-    )
+    df["region_mean_price"] = df["region_mean_price"].fillna(region_means.mean())
 
     features = df.drop(columns=["region", "lat_bin", "lon_bin"])
     x_tr, x_te = features.loc[tr_idx], features.loc[te_idx]
@@ -148,6 +153,7 @@ def run_correct() -> float:
 
 
 # -----------------------------------------------------------------
+
 
 def main() -> None:
     leaky_r2 = run_leaky()

@@ -4,7 +4,10 @@ Each test either injects a known failure and asserts the firewall
 raises, or exercises a legitimate path and asserts the firewall
 does not raise. Parameterised where failure has multiple shapes.
 """
+
 from __future__ import annotations
+
+import re
 
 import numpy as np
 import pandas as pd
@@ -21,10 +24,10 @@ from schema_firewall import (
     check_stateless,
 )
 
-
 # ───────────────────────────────────────────────────────────────────
 # Fixtures
 # ───────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def clean_frame() -> tuple[pd.DataFrame, pd.Series]:
@@ -138,19 +141,14 @@ def test_leakage_empty_numeric_frame_passes():
 
 
 def test_leakage_handles_low_cardinality_classification_target():
-    """Regression test for the bug class motivating retracted Finding #1
-    in the 2026-05-23 audit.
+    """A low-cardinality *numeric* classification target (<= 5 classes) must
+    not false-positive on independent features, yet still catch a target copy.
 
-    The audit originally hypothesised that low-cardinality classification
-    targets (<= 5 unique values) would underflow the histogram-based
-    entropy denominator and cause a false-positive `LeakageError` on
-    every numeric feature. Verify-first (sprint #1) disproved that
-    mechanism: `p = p[p > 0]` filters empty bins before entropy is
-    computed, so y_entropy = log(n_unique) rather than zero.
-
-    This test pins that correct behavior so any future change to
-    `_shannon_entropy` or `mutual_info_regression` integration that
-    breaks classification targets fails the suite loudly."""
+    The MI normalisation now divides by the target's self-information MI(y; y)
+    (same estimator as the per-column MI), so a 3-class integer target gives a
+    well-defined baseline: independent features land far below threshold, and a
+    copy normalises to ~1.0. This pins that behaviour so any future change to
+    the MI normalisation that breaks classification targets fails loudly."""
     rng = np.random.default_rng(0)
     n = 200
 
@@ -322,10 +320,7 @@ def test_public_api_shape():
     import schema_firewall as sf
 
     # exactly three check functions exported
-    check_names = {
-        n for n in dir(sf)
-        if n.startswith("check_") and callable(getattr(sf, n))
-    }
+    check_names = {n for n in dir(sf) if n.startswith("check_") and callable(getattr(sf, n))}
     assert check_names == {"check_leakage", "check_schema", "check_stateless"}
 
     # schema + exceptions importable from top-level
@@ -333,3 +328,100 @@ def test_public_api_shape():
     assert issubclass(sf.LeakageError, sf.SchemaFirewallError)
     assert issubclass(sf.SchemaError, sf.SchemaFirewallError)
     assert issubclass(sf.StatelessnessError, sf.SchemaFirewallError)
+
+
+# ───────────────────────────────────────────────────────────────────
+# 5. Audit regressions (2026-06)
+# ───────────────────────────────────────────────────────────────────
+
+
+def test_leakage_single_nan_does_not_crash(clean_frame):
+    """A single NaN in a numeric feature or in the target used to raise a raw
+    sklearn ValueError from mutual_info_regression, escaping the exception
+    hierarchy. NaNs are now dropped pairwise per column."""
+    x, y = clean_frame
+    x = x.copy()
+    x.loc[5, "sqft"] = np.nan
+    check_leakage(x, y)  # no crash; independent feature -> no leak
+
+    y_nan = y.copy()
+    y_nan.iloc[3] = np.nan
+    check_leakage(x, y_nan)  # NaN in target also handled
+
+
+def test_leakage_mi_norm_is_bounded_in_unit_interval(clean_frame):
+    """The 'mi_norm in [0, 1]' claim must hold: a perfect copy normalises to
+    1.0, not >1 (the old histogram-entropy denominator gave ~1.33)."""
+    x, y = clean_frame
+    x = x.copy()
+    x["copy"] = y.to_numpy()
+    try:
+        check_leakage(x, y)
+        pytest.fail("expected LeakageError on a target copy")
+    except LeakageError as exc:
+        values = [float(v) for v in re.findall(r"mi_norm=([0-9.]+)", str(exc))]
+        assert values, str(exc)
+        assert all(0.0 <= v <= 1.0 for v in values), f"mi_norm out of [0,1]: {values}"
+
+
+def test_leakage_rejects_non_numeric_target(clean_frame):
+    """A string classification target raised a raw 'could not convert string to
+    float'; it now fails with a clear LeakageError."""
+    x, _ = clean_frame
+    y_str = pd.Series((["a", "b", "c"] * (len(x) // 3 + 1))[: len(x)])
+    with pytest.raises(LeakageError, match="numeric target"):
+        check_leakage(x, y_str)
+
+
+def test_stateless_catches_global_statistic_row_filter(clean_frame):
+    """A filter on a FULL-frame statistic (median) is state-dependent: a kept
+    row processed alone has the row as its own median and is dropped, producing
+    an empty one-row output. The old code skipped that (`continue`) — a false
+    negative on exactly the leak class this check targets."""
+    x, _ = clean_frame
+
+    def global_median_filter(df):
+        out = df.copy()
+        return out[out["sqft"] > out["sqft"].median()]
+
+    with pytest.raises(StatelessnessError, match="state-dependent"):
+        check_stateless(global_median_filter, x)
+
+
+def test_stateless_names_index_preservation_precondition(clean_frame):
+    """An index-resetting pipeline used to surface as a confusing
+    'sample_indices not in raw.index' error the caller never caused. It now
+    fails naming the index-preservation precondition."""
+    x, _ = clean_frame
+    x = x.copy()
+    x.index = [f"row_{i}" for i in range(len(x))]
+
+    def index_resetting(df):
+        out = df.copy().reset_index(drop=True)  # relabels to 0..n-1
+        out["sqft_doubled"] = out["sqft"] * 2
+        return out[["sqft_doubled"]]
+
+    with pytest.raises(StatelessnessError, match="preserve the input index"):
+        check_stateless(index_resetting, x)
+
+
+def test_stateless_clear_error_when_sample_index_dropped_from_output(clean_frame):
+    """Spot-checking a row the pipeline drops from its full output used to raise
+    a raw pandas KeyError; it now gives a clear message."""
+    x, _ = clean_frame
+
+    def drop_label_zero(df):
+        out = df[df.index != 0].copy()  # row-wise drop of label 0
+        out["sqft_doubled"] = out["sqft"] * 2
+        return out[["sqft_doubled"]]
+
+    with pytest.raises(ValueError, match="dropped by pipeline_fn"):
+        check_stateless(drop_label_zero, x, sample_indices=[0])
+
+
+@pytest.mark.parametrize("spec", ["int64", "i8", "<i8"])
+def test_schema_dtype_accepts_equivalent_int_spellings(spec):
+    """'int64', 'i8', '<i8' all resolve to the same dtype; a raw string compare
+    rejected them against the actual 'int64'."""
+    x = pd.DataFrame({"age": pd.Series([30, 40], dtype="int64")})
+    check_schema(x, SchemaContract(dtypes={"age": spec}))  # no raise
