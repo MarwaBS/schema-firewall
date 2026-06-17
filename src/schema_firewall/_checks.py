@@ -14,10 +14,15 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_selection import mutual_info_regression
+from sklearn.metrics import adjusted_mutual_info_score
 
 from ._exceptions import LeakageError, SchemaError, StatelessnessError
 from ._schema import SchemaContract
+
+# Below this many finite paired samples, correlation and MI are dominated by
+# sampling noise (two random points always correlate |r|=1), so leakage
+# detection is not meaningful — better to refuse than to false-positive.
+_MIN_SAMPLES = 30
 
 # --- Public: leakage detection ---------------------------------------
 
@@ -27,7 +32,7 @@ def check_leakage(
     y: pd.Series,
     *,
     max_abs_corr: float = 0.95,
-    mi_threshold: float = 0.8,
+    mi_threshold: float = 0.3,
 ) -> None:
     """Fail if any column in X shows suspicious dependency with y.
 
@@ -36,29 +41,38 @@ def check_leakage(
     - Pearson |r|  > ``max_abs_corr`` -> linear leakage
     - Spearman |rho| > ``max_abs_corr`` -> monotonic leakage (catches
       log-transforms, rank re-encodings, expm1-of-log, etc.)
-    - normalised mutual information > ``mi_threshold`` -> general,
-      including non-monotonic, dependency
+    - normalised mutual information > ``mi_threshold`` -> general dependency,
+      INCLUDING non-monotone relationships (``y = x**2``, ``y = |x|``,
+      ``y = cos(3x)``) that Pearson and Spearman both miss
 
-    MI is normalised by the target's *self-information* ``MI(y; y)`` computed
-    with the SAME estimator (sklearn ``mutual_info_regression``), giving a
-    scale-free ratio in [0, 1] where 1.0 means "as informative about y as y is
-    about itself" (a copy). Normalising by a histogram Shannon entropy instead
-    (as a prior version did) mixes a continuous MI estimate with a binned
-    entropy and lets the ratio exceed 1, with semantics that drift with the bin
-    count. NaNs are dropped pairwise per column before every metric, so a single
-    missing value no longer crashes the check. The default thresholds are
-    conservative -- they flag features that are almost certainly target-derived.
-    Tune for your domain.
+    The MI is a *discrete normalised mutual information*: both the feature and
+    the target are quantile-binned and scored with sklearn's
+    ``normalized_mutual_info_score(..., average_method="min")``. The result is a
+    single consistent estimator genuinely bounded in [0, 1] -- 1.0 when either
+    variable determines the other (a copy OR a deterministic non-monotone
+    transform), ~0 under independence. (A previous version divided a continuous
+    kNN MI estimate by a self-MI baseline; that estimator was so deflated it
+    only fired on an exact copy, so the MI detector caught nothing the linear/
+    rank detectors didn't -- the non-monotone case ``y = x**2`` slipped through.
+    The discrete NMI fixes that and also removes the small-``n`` crash the kNN
+    estimator raised for ``n <= n_neighbors``.) NaNs are dropped pairwise per
+    column before every metric, so a single missing value never crashes the
+    check.
 
     The target ``y`` must be numeric: all three detectors are defined on a
-    continuous target. Encode classification labels (e.g. ``LabelEncoder``)
-    before calling.
+    continuous (or integer-encoded) target. Encode classification labels (e.g.
+    ``LabelEncoder``) before calling.
+
+    ``mi_threshold`` is an adjusted-MI threshold in [0, 1] (default 0.3):
+    deterministic dependence — copies and non-monotone transforms — lands well
+    above it, while honest noisy predictors and independent columns land near 0.
 
     Raises:
+        ValueError: fewer than ``30`` finite paired samples (leakage detection
+            is noise-dominated below that).
         LeakageError: one or more columns crossed at least one detector's
-            threshold, or the target is unusable (non-numeric, constant, or
-            with fewer than two finite values). The message lists every
-            violating column with all three metrics.
+            threshold, or the target is non-numeric or constant. The message
+            lists every violating column with all three metrics.
     """
     numeric = X.select_dtypes(include=[np.number])
     if numeric.empty:
@@ -73,32 +87,30 @@ def check_leakage(
         ) from exc
 
     y_mask = np.isfinite(y_arr)
-    if y_mask.sum() < 2:
-        raise LeakageError("target has fewer than two finite values; leakage check undefined")
-    y_finite = y_arr[y_mask]
-    if y_finite.std() == 0:
+    if int(y_mask.sum()) < _MIN_SAMPLES:
+        raise ValueError(
+            f"check_leakage needs at least {_MIN_SAMPLES} finite samples for "
+            f"reliable detection; got {int(y_mask.sum())}. With fewer, sampling "
+            f"noise dominates correlation and mutual information."
+        )
+    if y_arr[y_mask].std() == 0:
         raise LeakageError("target is constant or all-NaN; leakage check undefined")
-
-    # Self-information baseline MI(y; y), same estimator as the per-column MI,
-    # so mi / mi_self is a consistent ratio in [0, 1] (1.0 == a copy of y).
-    mi_self = float(mutual_info_regression(y_finite.reshape(-1, 1), y_finite, random_state=0)[0])
-    if mi_self <= 0:
-        raise LeakageError("target self-information is non-positive; leakage check undefined")
 
     violations: list[str] = []
     for col in numeric.columns:
         feat = numeric[col].to_numpy(dtype=float)
         # Drop rows where the feature OR the target is non-finite, so a single
-        # NaN does not crash mutual_info_regression (which rejects NaN).
+        # NaN does not poison a metric. A column with too few finite paired rows
+        # can't be assessed reliably, so skip it rather than risk a noise-driven
+        # false positive.
         mask = np.isfinite(feat) & y_mask
-        if mask.sum() < 2:
+        if int(mask.sum()) < _MIN_SAMPLES:
             continue
         feat_m, y_m = feat[mask], y_arr[mask]
 
         pearson = abs(_safe_corr(feat, y_arr, method="pearson"))
         spearman = abs(_safe_corr(feat, y_arr, method="spearman"))
-        mi = float(mutual_info_regression(feat_m.reshape(-1, 1), y_m, random_state=0)[0])
-        mi_norm = min(1.0, max(0.0, mi / mi_self))
+        mi_norm = _normalised_mi(feat_m, y_m)
 
         if pearson > max_abs_corr or spearman > max_abs_corr or mi_norm > mi_threshold:
             violations.append(
@@ -225,10 +237,29 @@ def check_stateless(
         )
 
     if sample_indices is None:
-        # Spread five spot-checks across the frame so the check isn't
-        # fooled by the first row happening to sit in a singleton group.
+        # Spot-check the EXTREME-value rows of every numeric column plus an even
+        # spread. A global-statistic transform (winsorise/clip/robust-scale,
+        # quantile filter) only edits tail rows, so a fixed-stride sample
+        # routinely misses it; the rows holding each column's min and max are
+        # exactly the ones such a transform touches. (Pass an explicit
+        # `sample_indices` to check more rows; checking every row is the
+        # strongest, at one pipeline call per row.)
+        picks: list[Hashable] = []
+        kept_numeric = raw.loc[first.index].select_dtypes(include=[np.number])
+        for col in kept_numeric.columns:
+            s = kept_numeric[col].dropna()
+            if not s.empty:
+                picks.append(s.idxmin())
+                picks.append(s.idxmax())
         step = max(1, n // 5)
-        sample_indices = [first.index[i] for i in range(0, n, step)][:5]
+        picks.extend(first.index[i] for i in range(0, n, step))
+        seen: set = set()
+        deduped: list[Hashable] = []
+        for i in picks:
+            if i not in seen:
+                seen.add(i)
+                deduped.append(i)
+        sample_indices = deduped
 
     for idx in sample_indices:
         if idx not in raw.index:
@@ -287,6 +318,43 @@ def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: Literal["pearson", "spea
     # Reachable only from an untyped caller passing a bogus method name;
     # typed callers are constrained by Literal at static time.
     raise ValueError(f"unknown correlation method {method!r}; expected 'pearson' or 'spearman'")
+
+
+def _quantile_bins(x: np.ndarray, n_bins: int) -> np.ndarray:
+    """Discretise a finite 1-D array into <= ``n_bins`` quantile bins (labels).
+
+    Quantile (equal-frequency) edges adapt to the data's distribution. Ties in
+    the edges collapse to fewer bins; a near-constant array collapses to one.
+    """
+    uniq = np.unique(x)
+    if uniq.size < 2:
+        return np.zeros(x.shape, dtype=np.int64)
+    bins = min(n_bins, uniq.size)
+    edges = np.unique(np.quantile(x, np.linspace(0.0, 1.0, bins + 1)))
+    # Interior edges only; np.digitize then maps values to bin indices.
+    return np.digitize(x, edges[1:-1]).astype(np.int64)
+
+
+def _normalised_mi(feat: np.ndarray, y: np.ndarray, *, n_bins: int = 16) -> float:
+    """Adjusted (chance-corrected) mutual information, clamped to [0, 1].
+
+    Both arrays are quantile-binned and scored with sklearn's
+    ``adjusted_mutual_info_score`` -- mutual information corrected for the
+    agreement expected by chance. Adjustment matters: a plain NMI has a positive
+    finite-sample bias, so independent variables score well above 0 at small n
+    (a false positive). AMI ~= 0 under independence regardless of n or bin
+    count, ~= 1 when one variable determines the other -- INCLUDING a
+    non-monotone deterministic transform such as ``y = feat**2`` (each feature
+    bin maps to a single target bin). It can be slightly negative by chance, so
+    clamp at 0. This is what makes the MI detector catch non-monotone leakage
+    that Pearson/Spearman miss, without false-positiving on noise.
+    """
+    fb = _quantile_bins(feat, n_bins)
+    yb = _quantile_bins(y, n_bins)
+    if np.unique(fb).size < 2 or np.unique(yb).size < 2:
+        # One side is effectively constant after binning -> no dependence.
+        return 0.0
+    return max(0.0, float(adjusted_mutual_info_score(fb, yb)))
 
 
 __all__ = ["check_leakage", "check_schema", "check_stateless"]

@@ -15,9 +15,14 @@ regression test.
 - `check_leakage` no longer crashes with a raw sklearn `ValueError` on a single
   NaN in any numeric feature or in the target; NaNs are dropped pairwise per
   column before every metric.
-- `check_stateless` now fails (instead of silently skipping via `continue`) when
-  a row kept in the full-frame output is dropped when processed alone — the
-  false negative on global-statistic row filters like `df[df.x > df.x.median()]`.
+- `check_stateless` now catches global-statistic row filters in two ways: an
+  empty one-row output for a kept row fails (was silently skipped via
+  `continue`), AND the default spot-check now includes each numeric column's
+  extreme-value rows — so tail-only transforms (winsorise/clip/robust-scale,
+  quantile filters) are caught deterministically instead of ~79% of the time.
+- `check_leakage` raises a clear `ValueError` below 30 finite samples (was a raw
+  sklearn "n_neighbors < n_samples" crash, or a false positive from a |r|=1
+  two-point correlation).
 - Clear errors replace raw pandas `KeyError`s: spot-checking a row the pipeline
   drops, and pipelines that reset/relabel the index, now raise messages naming
   the actual precondition.
@@ -27,10 +32,14 @@ regression test.
   than a raw "could not convert string to float".
 
 ### Changed
-- MI is normalised by the target's self-information `MI(y; y)` under the same
-  estimator, so `mi_norm` is genuinely in `[0, 1]` (a perfect copy → 1.0). The
-  previous histogram-Shannon-entropy denominator let it exceed 1 (~1.33) and
-  drift with the bin count; the `_shannon_entropy` helper was removed.
+- **MI detector rebuilt as adjusted (chance-corrected) mutual information** on
+  quantile bins. The previous design (continuous kNN MI divided by a self-MI
+  baseline) was so deflated it only fired on an exact copy — it caught nothing
+  Pearson/Spearman didn't, and **missed non-monotone leakage entirely**
+  (`y = x**2` slipped through). Adjusted MI is genuinely in `[0, 1]`, ~0 under
+  independence regardless of sample size, ~1 when a feature determines the
+  target (copy OR non-monotone transform), and leaves honest noisy predictors
+  alone. The default `mi_threshold` is recalibrated to `0.3` for this estimator.
 - The example demo's `check_stateless` branch now exits non-zero if the check
   misses the leak, so the README's "both checks raise" claim is enforced by
   running the demo (and by `tests/test_demo.py`).
