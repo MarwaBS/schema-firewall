@@ -46,9 +46,11 @@ from schema_firewall import (
 X: pd.DataFrame  # your feature frame
 y: pd.Series     # your target
 
-# 1. Statistical leakage — Pearson + Spearman + normalised mutual info.
-#    Catches target-copies, monotonic transforms, sigmoid/rank re-encodings,
-#    and strong confounders. Raises LeakageError on fail.
+# 1. Statistical leakage — Pearson + Spearman + adjusted mutual information.
+#    Pearson catches linear copies, Spearman monotonic transforms, and the
+#    chance-corrected MI catches NON-monotone deterministic leakage (y=x**2,
+#    |x|, cos(x)) that both correlations miss — while leaving honest noisy
+#    predictors alone. Needs >=30 rows. Raises LeakageError on fail.
 check_leakage(X, y)
 
 # 2. Schema contract — forbidden columns, required columns, dtypes.
