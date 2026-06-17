@@ -144,11 +144,10 @@ def test_leakage_handles_low_cardinality_classification_target():
     """A low-cardinality *numeric* classification target (<= 5 classes) must
     not false-positive on independent features, yet still catch a target copy.
 
-    The MI normalisation now divides by the target's self-information MI(y; y)
-    (same estimator as the per-column MI), so a 3-class integer target gives a
-    well-defined baseline: independent features land far below threshold, and a
-    copy normalises to ~1.0. This pins that behaviour so any future change to
-    the MI normalisation that breaks classification targets fails loudly."""
+    The MI detector uses adjusted (chance-corrected) mutual information on
+    quantile bins, so a 3-class integer target is handled cleanly: independent
+    features land near 0 (AMI corrects for chance regardless of cardinality) and
+    a copy lands at ~1.0. Pins that behaviour against future regressions."""
     rng = np.random.default_rng(0)
     n = 200
 
@@ -373,6 +372,50 @@ def test_leakage_rejects_non_numeric_target(clean_frame):
         check_leakage(x, y_str)
 
 
+@pytest.mark.parametrize(
+    "transform",
+    [
+        pytest.param(lambda v: v**2, id="square"),
+        pytest.param(np.abs, id="abs"),
+        pytest.param(lambda v: np.cos(3 * v), id="cos"),
+    ],
+)
+def test_leakage_catches_non_monotone_dependence(transform):
+    """The MI detector must catch NON-monotone deterministic leakage that
+    Pearson AND Spearman both miss (y = x**2, |x|, cos(3x)). The previous
+    self-MI normalisation was so deflated it missed all of these — the whole
+    point of having an MI pillar."""
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=300)
+    leak = transform(x)
+    # Sanity: both linear and rank correlation are near zero here.
+    assert abs(np.corrcoef(x, leak)[0, 1]) < 0.2
+    with pytest.raises(LeakageError, match="leak"):
+        check_leakage(pd.DataFrame({"safe": rng.normal(size=300), "leak": x}), pd.Series(leak))
+
+
+def test_leakage_passes_legitimate_noisy_predictor():
+    """A genuinely predictive but noisy feature (real signal + real noise, not a
+    deterministic encoding of the target) must NOT be flagged — adjusted MI
+    measures shared information, so noise keeps an honest predictor well below
+    threshold. Guards against false positives on real features."""
+    rng = np.random.default_rng(1)
+    n = 300
+    y = rng.lognormal(13, 0.5, n)
+    predictor = 0.5 * (y - y.mean()) / y.std() + rng.normal(0, 1, n)  # corr ~0.45, noisy
+    check_leakage(pd.DataFrame({"predictor": predictor}), pd.Series(y))  # no raise
+
+
+def test_leakage_small_sample_raises_clear_precondition():
+    """Below the minimum sample size, correlation/MI are noise-dominated (two
+    random points always correlate |r|=1). The check now raises a clear
+    ValueError precondition instead of a raw sklearn crash or a false leak."""
+    rng = np.random.default_rng(0)
+    for n in (2, 3, 4, 10, 25):
+        with pytest.raises(ValueError, match="at least 30 finite samples"):
+            check_leakage(pd.DataFrame({"f": rng.normal(size=n)}), pd.Series(rng.normal(size=n)))
+
+
 def test_stateless_catches_global_statistic_row_filter(clean_frame):
     """A filter on a FULL-frame statistic (median) is state-dependent: a kept
     row processed alone has the row as its own median and is dropped, producing
@@ -386,6 +429,23 @@ def test_stateless_catches_global_statistic_row_filter(clean_frame):
 
     with pytest.raises(StatelessnessError, match="state-dependent"):
         check_stateless(global_median_filter, x)
+
+
+def test_stateless_catches_global_winsorizer(clean_frame):
+    """A global-quantile clip (winsorise) only edits TAIL rows, so the old
+    fixed-stride spot-checks missed it ~79% of the time. Spot-checking each
+    numeric column's extreme rows catches it deterministically (the modified
+    row, processed alone, has itself as its own quantile and is left unclipped,
+    diverging from the full-frame output)."""
+    x, _ = clean_frame
+
+    def winsorize(df):
+        out = df.copy()
+        out["sqft_clip"] = out["sqft"].clip(upper=out["sqft"].quantile(0.95))
+        return out[["sqft_clip"]]
+
+    with pytest.raises(StatelessnessError, match="state-dependent"):
+        check_stateless(winsorize, x)
 
 
 def test_stateless_names_index_preservation_precondition(clean_frame):
