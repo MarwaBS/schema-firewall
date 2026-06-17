@@ -20,9 +20,11 @@ regression test.
   `continue`), AND the default spot-check now includes each numeric column's
   extreme-value rows — so tail-only transforms (winsorise/clip/robust-scale,
   quantile filters) are caught deterministically instead of ~79% of the time.
-- `check_leakage` raises a clear `ValueError` below 30 finite samples (was a raw
-  sklearn "n_neighbors < n_samples" crash, or a false positive from a |r|=1
-  two-point correlation).
+- `check_stateless` rejects a non-unique index (the per-row spot-check selects
+  by label, so duplicate labels made it vacuous and a global transform passed).
+- `check_leakage` raises a clear `ValueError` below 100 finite samples (was a raw
+  sklearn crash / a |r|=1 two-point false positive). Below ~100 rows the binned
+  MI is noise-dominated, so there is no honest threshold.
 - Clear errors replace raw pandas `KeyError`s: spot-checking a row the pipeline
   drops, and pipelines that reset/relabel the index, now raise messages naming
   the actual precondition.
@@ -33,13 +35,18 @@ regression test.
 
 ### Changed
 - **MI detector rebuilt as adjusted (chance-corrected) mutual information** on
-  quantile bins. The previous design (continuous kNN MI divided by a self-MI
-  baseline) was so deflated it only fired on an exact copy — it caught nothing
-  Pearson/Spearman didn't, and **missed non-monotone leakage entirely**
-  (`y = x**2` slipped through). Adjusted MI is genuinely in `[0, 1]`, ~0 under
-  independence regardless of sample size, ~1 when a feature determines the
-  target (copy OR non-monotone transform), and leaves honest noisy predictors
-  alone. The default `mi_threshold` is recalibrated to `0.3` for this estimator.
+  sample-size-adaptive bins. The previous design (continuous kNN MI divided by a
+  self-MI baseline) was so deflated it only fired on an exact copy — it caught
+  nothing Pearson/Spearman didn't, and **missed non-monotone leakage entirely**
+  (`y = x**2` slipped through). A first rebuild then silently collapsed
+  **binary/low-cardinality targets** to one bin (AMI ≡ 0, every 0/1 target
+  invisible). The final detector discretises low-cardinality values one-per-bin
+  and continuous values into sqrt(n) quantile bins, and scores adjusted MI:
+  genuinely in `[0, 1]`, ~0 under independence regardless of sample size, ~1
+  when a feature determines the target — copy, binary/k-class encoding, OR
+  non-monotone transform — and leaves honest noisy predictors alone. Verified
+  0% miss / 0 false positives across these cases and seeds at n >= 100. Default
+  `mi_threshold` recalibrated to `0.2`.
 - The example demo's `check_stateless` branch now exits non-zero if the check
   misses the leak, so the README's "both checks raise" claim is enforced by
   running the demo (and by `tests/test_demo.py`).

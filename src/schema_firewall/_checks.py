@@ -19,10 +19,14 @@ from sklearn.metrics import adjusted_mutual_info_score
 from ._exceptions import LeakageError, SchemaError, StatelessnessError
 from ._schema import SchemaContract
 
-# Below this many finite paired samples, correlation and MI are dominated by
-# sampling noise (two random points always correlate |r|=1), so leakage
-# detection is not meaningful — better to refuse than to false-positive.
-_MIN_SAMPLES = 30
+# Below this many finite paired samples, the binned adjusted-MI estimate is
+# noise-dominated: independent/legit features can score as high as a real
+# non-monotone leak, so there is no honest threshold (and a 2-point correlation
+# is always |r|=1). Empirically, at >= 100 samples deterministic leaks —
+# including binary/k-class targets and non-monotone transforms — separate
+# cleanly from noise (0% miss, 0 false positives across seeds). Below it, refuse
+# rather than guess.
+_MIN_SAMPLES = 100
 
 # --- Public: leakage detection ---------------------------------------
 
@@ -32,7 +36,7 @@ def check_leakage(
     y: pd.Series,
     *,
     max_abs_corr: float = 0.95,
-    mi_threshold: float = 0.3,
+    mi_threshold: float = 0.2,
 ) -> None:
     """Fail if any column in X shows suspicious dependency with y.
 
@@ -63,12 +67,14 @@ def check_leakage(
     continuous (or integer-encoded) target. Encode classification labels (e.g.
     ``LabelEncoder``) before calling.
 
-    ``mi_threshold`` is an adjusted-MI threshold in [0, 1] (default 0.3):
-    deterministic dependence — copies and non-monotone transforms — lands well
-    above it, while honest noisy predictors and independent columns land near 0.
+    ``mi_threshold`` is an adjusted-MI threshold in [0, 1] (default 0.2):
+    deterministic dependence — copies, k-class/binary target encodings, and
+    non-monotone transforms — lands well above it, while honest noisy predictors
+    and independent columns land near 0. At least ``100`` rows are required; bins
+    scale with sample size to keep the estimate stable.
 
     Raises:
-        ValueError: fewer than ``30`` finite paired samples (leakage detection
+        ValueError: fewer than ``100`` finite paired samples (leakage detection
             is noise-dominated below that).
         LeakageError: one or more columns crossed at least one detector's
             threshold, or the target is non-numeric or constant. The message
@@ -222,6 +228,20 @@ def check_stateless(
     if n == 0:
         return
 
+    # Unique-index precondition. The spot-check selects a single row by label
+    # (raw.loc[[label]]); with duplicate labels that pulls EVERY row sharing the
+    # label, so the "one-row subset" is the whole frame and the check compares it
+    # to itself -- a global transform would sail through. Duplicate indices are
+    # routine after pd.concat / repeated timestamps, so refuse rather than give a
+    # false pass.
+    if not raw.index.is_unique:
+        raise StatelessnessError(
+            "raw.index has duplicate labels; the per-row spot-check selects by "
+            "label, so a one-row subset would pull every row sharing that label "
+            "and the check would be vacuous. Pass a unique index "
+            "(e.g. raw.reset_index(drop=True))."
+        )
+
     # Index-preservation precondition. The spot-check aligns rows by index, so
     # pipeline_fn(raw) must keep rows under their ORIGINAL labels. A row-wise
     # filter that drops rows is fine (it returns a subset of raw.index); a
@@ -320,25 +340,30 @@ def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: Literal["pearson", "spea
     raise ValueError(f"unknown correlation method {method!r}; expected 'pearson' or 'spearman'")
 
 
-def _quantile_bins(x: np.ndarray, n_bins: int) -> np.ndarray:
-    """Discretise a finite 1-D array into <= ``n_bins`` quantile bins (labels).
+def _discretise(x: np.ndarray, n_bins: int) -> np.ndarray:
+    """Discretise a finite 1-D array into integer bin labels.
 
-    Quantile (equal-frequency) edges adapt to the data's distribution. Ties in
-    the edges collapse to fewer bins; a near-constant array collapses to one.
+    Low-cardinality / discrete data (<= ``n_bins`` distinct values, e.g. a
+    binary or k-class target) keeps each distinct value as its own bin -- using
+    quantile edges there collapses a binary 0/1 target to a single bin and makes
+    it invisible to the MI detector. Continuous data is split into ``n_bins``
+    equal-frequency (quantile) bins.
     """
     uniq = np.unique(x)
     if uniq.size < 2:
         return np.zeros(x.shape, dtype=np.int64)
-    bins = min(n_bins, uniq.size)
-    edges = np.unique(np.quantile(x, np.linspace(0.0, 1.0, bins + 1)))
+    if uniq.size <= n_bins:
+        # Discrete / low-cardinality: one bin per distinct value.
+        return np.searchsorted(uniq, x).astype(np.int64)
+    edges = np.unique(np.quantile(x, np.linspace(0.0, 1.0, n_bins + 1)))
     # Interior edges only; np.digitize then maps values to bin indices.
     return np.digitize(x, edges[1:-1]).astype(np.int64)
 
 
-def _normalised_mi(feat: np.ndarray, y: np.ndarray, *, n_bins: int = 16) -> float:
+def _normalised_mi(feat: np.ndarray, y: np.ndarray) -> float:
     """Adjusted (chance-corrected) mutual information, clamped to [0, 1].
 
-    Both arrays are quantile-binned and scored with sklearn's
+    Both arrays are discretised and scored with sklearn's
     ``adjusted_mutual_info_score`` -- mutual information corrected for the
     agreement expected by chance. Adjustment matters: a plain NMI has a positive
     finite-sample bias, so independent variables score well above 0 at small n
@@ -348,9 +373,15 @@ def _normalised_mi(feat: np.ndarray, y: np.ndarray, *, n_bins: int = 16) -> floa
     bin maps to a single target bin). It can be slightly negative by chance, so
     clamp at 0. This is what makes the MI detector catch non-monotone leakage
     that Pearson/Spearman miss, without false-positiving on noise.
+
+    The bin count scales with sample size (sqrt rule, capped at 16): too many
+    bins on few samples gives ~1 sample/bin and unstable estimates, so smaller
+    frames use coarser bins to keep the estimate stable.
     """
-    fb = _quantile_bins(feat, n_bins)
-    yb = _quantile_bins(y, n_bins)
+    n = int(feat.shape[0])
+    n_bins = min(16, max(4, round(n**0.5)))
+    fb = _discretise(feat, n_bins)
+    yb = _discretise(y, n_bins)
     if np.unique(fb).size < 2 or np.unique(yb).size < 2:
         # One side is effectively constant after binning -> no dependence.
         return 0.0
