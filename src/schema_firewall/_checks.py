@@ -9,7 +9,7 @@ All logic is deterministic, stateless, and row-wise where applicable.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable, Sequence
 from typing import Literal
 
 import numpy as np
@@ -39,35 +39,66 @@ def check_leakage(
     - normalised mutual information > ``mi_threshold`` -> general,
       including non-monotonic, dependency
 
-    MI is normalised by the target's histogram-based Shannon entropy,
-    giving a scale-free ratio in [0, 1]. The default thresholds are
-    conservative -- they flag features that are almost certainly
-    target-derived. Tune for your domain.
+    MI is normalised by the target's *self-information* ``MI(y; y)`` computed
+    with the SAME estimator (sklearn ``mutual_info_regression``), giving a
+    scale-free ratio in [0, 1] where 1.0 means "as informative about y as y is
+    about itself" (a copy). Normalising by a histogram Shannon entropy instead
+    (as a prior version did) mixes a continuous MI estimate with a binned
+    entropy and lets the ratio exceed 1, with semantics that drift with the bin
+    count. NaNs are dropped pairwise per column before every metric, so a single
+    missing value no longer crashes the check. The default thresholds are
+    conservative -- they flag features that are almost certainly target-derived.
+    Tune for your domain.
+
+    The target ``y`` must be numeric: all three detectors are defined on a
+    continuous target. Encode classification labels (e.g. ``LabelEncoder``)
+    before calling.
 
     Raises:
-        LeakageError: one or more columns crossed at least one
-            detector's threshold. The message lists every violating
-            column with all three metrics.
+        LeakageError: one or more columns crossed at least one detector's
+            threshold, or the target is unusable (non-numeric, constant, or
+            with fewer than two finite values). The message lists every
+            violating column with all three metrics.
     """
     numeric = X.select_dtypes(include=[np.number])
     if numeric.empty:
         return
 
-    y_arr = np.asarray(y, dtype=float)
-    y_entropy = _shannon_entropy(y_arr)
-    if y_entropy <= 0:
+    try:
+        y_arr = np.asarray(y, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise LeakageError(
+            "check_leakage requires a numeric target; got a non-numeric y. "
+            "Encode classification labels (e.g. with a LabelEncoder) first."
+        ) from exc
+
+    y_mask = np.isfinite(y_arr)
+    if y_mask.sum() < 2:
+        raise LeakageError("target has fewer than two finite values; leakage check undefined")
+    y_finite = y_arr[y_mask]
+    if y_finite.std() == 0:
         raise LeakageError("target is constant or all-NaN; leakage check undefined")
+
+    # Self-information baseline MI(y; y), same estimator as the per-column MI,
+    # so mi / mi_self is a consistent ratio in [0, 1] (1.0 == a copy of y).
+    mi_self = float(mutual_info_regression(y_finite.reshape(-1, 1), y_finite, random_state=0)[0])
+    if mi_self <= 0:
+        raise LeakageError("target self-information is non-positive; leakage check undefined")
 
     violations: list[str] = []
     for col in numeric.columns:
         feat = numeric[col].to_numpy(dtype=float)
-        if not np.isfinite(feat).any():
+        # Drop rows where the feature OR the target is non-finite, so a single
+        # NaN does not crash mutual_info_regression (which rejects NaN).
+        mask = np.isfinite(feat) & y_mask
+        if mask.sum() < 2:
             continue
+        feat_m, y_m = feat[mask], y_arr[mask]
 
         pearson = abs(_safe_corr(feat, y_arr, method="pearson"))
         spearman = abs(_safe_corr(feat, y_arr, method="spearman"))
-        mi = float(mutual_info_regression(feat.reshape(-1, 1), y_arr, random_state=0)[0])
-        mi_norm = mi / y_entropy
+        mi = float(mutual_info_regression(feat_m.reshape(-1, 1), y_m, random_state=0)[0])
+        mi_norm = min(1.0, max(0.0, mi / mi_self))
 
         if pearson > max_abs_corr or spearman > max_abs_corr or mi_norm > mi_threshold:
             violations.append(
@@ -104,9 +135,19 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
         for col, expected in contract.dtypes.items():
             if col not in X.columns:
                 continue  # covered by required_columns check above
-            actual = str(X[col].dtype)
-            if actual != expected:
-                dtype_violations.append(f"{col}: expected {expected!r}, got {actual!r}")
+            actual_dtype = X[col].dtype
+            # Compare resolved dtypes, not raw strings, so equivalent spellings
+            # match: "int", "i8", "<i8" all resolve to int64. A raw string
+            # compare rejected them against the actual "int64".
+            try:
+                expected_dtype = pd.api.types.pandas_dtype(expected)
+                matches = expected_dtype == actual_dtype
+            except TypeError:
+                # `expected` is not a recognised dtype string; fall back to exact
+                # string match so a typo'd contract still fails loudly.
+                matches = str(actual_dtype) == expected
+            if not matches:
+                dtype_violations.append(f"{col}: expected {expected!r}, got {str(actual_dtype)!r}")
         if dtype_violations:
             raise SchemaError("dtype violation(s):\n  " + "\n  ".join(dtype_violations))
 
@@ -118,7 +159,7 @@ def check_stateless(
     pipeline_fn: Callable[[pd.DataFrame], pd.DataFrame],
     raw: pd.DataFrame,
     *,
-    sample_indices: list | None = None,
+    sample_indices: Sequence[Hashable] | None = None,
 ) -> None:
     """Fail if ``pipeline_fn`` is not deterministic or not stateless.
 
@@ -169,6 +210,20 @@ def check_stateless(
     if n == 0:
         return
 
+    # Index-preservation precondition. The spot-check aligns rows by index, so
+    # pipeline_fn(raw) must keep rows under their ORIGINAL labels. A row-wise
+    # filter that drops rows is fine (it returns a subset of raw.index); a
+    # transform that resets/relabels the index is not. Name this precondition
+    # explicitly here, rather than letting it surface later as a confusing
+    # "sample_indices ... not in raw.index" error the caller never caused.
+    if not first.index.isin(raw.index).all():
+        raise StatelessnessError(
+            "pipeline_fn must preserve the input index: pipeline_fn(raw) returned "
+            "index labels not present in raw.index (the pipeline reset or "
+            "relabelled the index). Re-emit each row under its original index so "
+            "per-row spot-checks can be aligned."
+        )
+
     if sample_indices is None:
         # Spread five spot-checks across the frame so the check isn't
         # fooled by the first row happening to sit in a singleton group.
@@ -182,9 +237,25 @@ def check_stateless(
                 f"every sample index must appear in raw so the spot-check has "
                 f"something to compare against"
             )
+        if idx not in first.index:
+            raise ValueError(
+                f"sample index {idx!r} is in raw.index but was dropped by "
+                f"pipeline_fn from the full-frame output; spot-check a row the "
+                f"pipeline keeps (one in pipeline_fn(raw).index)"
+            )
         single_out = pipeline_fn(raw.loc[[idx]].copy())
         if len(single_out) == 0:
-            continue
+            # The full frame KEEPS this row but the one-row subset DROPS it: the
+            # keep/drop decision depends on the other rows. That is exactly the
+            # state-dependence this check exists to catch — the old code skipped
+            # it with `continue`, a false negative on global-statistic filters.
+            raise StatelessnessError(
+                f"pipeline is state-dependent at index {idx!r}: the row is kept "
+                f"when the full frame is processed but dropped when that row is "
+                f"processed alone. A stateless row-wise transform keeps it either "
+                f"way; a global-statistic filter (e.g. df[df.x > df.x.median()]) "
+                f"drops it."
+            )
         try:
             pd.testing.assert_frame_equal(
                 first.loc[[idx]].reset_index(drop=True),
@@ -216,16 +287,6 @@ def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: Literal["pearson", "spea
     # Reachable only from an untyped caller passing a bogus method name;
     # typed callers are constrained by Literal at static time.
     raise ValueError(f"unknown correlation method {method!r}; expected 'pearson' or 'spearman'")
-
-
-def _shannon_entropy(x: np.ndarray, *, bins: int = 64) -> float:
-    x = x[np.isfinite(x)]
-    if x.size < 2 or x.std() == 0:
-        return 0.0
-    hist, _ = np.histogram(x, bins=bins, density=False)
-    p = hist / hist.sum()
-    p = p[p > 0]
-    return float(-np.sum(p * np.log(p)))
 
 
 __all__ = ["check_leakage", "check_schema", "check_stateless"]

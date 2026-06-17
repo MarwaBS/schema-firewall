@@ -10,6 +10,7 @@ A failure here means EITHER (a) drift the README to the new numbers, OR
 (b) pin a tighter dependency floor to lock the old numbers. Both are
 explicit decisions, not silent staleness.
 """
+
 from __future__ import annotations
 
 import os
