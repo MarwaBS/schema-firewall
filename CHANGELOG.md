@@ -58,6 +58,20 @@ regression test.
 - CI runs `ruff check`, `ruff format --check`, and `mypy src` (matching the
   CONTRIBUTING promise) and adds Python 3.13 to the matrix and classifiers.
 - Linting now covers `tests/` and `examples/` (previously excluded).
+- Coverage is now **gated, not just mentioned**: `pytest-cov` is a dev
+  dependency and `pytest` runs branch coverage with `--cov-fail-under=90`
+  (current: 92%). A regression that drops a check's branch coverage now fails
+  CI instead of sliding through behind a green badge. The floor sits below
+  actual so it absorbs churn without being vacuous.
+
+### Docs
+- README "Default samples five spread indices" corrected — it described the
+  pre-0.1.3 stride-only sampler. `check_stateless` now spot-checks each numeric
+  column's min/max row, every NaN-bearing row, and a fixed-stride spread; the
+  README now says so.
+- README LoC figure refreshed to the verified current count (372 code / 515
+  raw) with a one-line reproduce command, so the "≤ 500 LoC" budget claim can't
+  silently rot again.
 
 ## [0.1.2] - 2026-05-28
 
