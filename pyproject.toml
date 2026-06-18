@@ -54,9 +54,10 @@ where = ["src"]
 schema_firewall = ["py.typed"]
 
 [tool.pytest.ini_options]
-# Coverage is gated, not just measured: a real floor below the current 94% so a
-# regression that drops a check's branch coverage fails CI instead of sliding by.
-# The floor sits a few points under actual to absorb churn without being vacuous.
+# Coverage is gated, not just measured: a real floor below the current 92%
+# (branch coverage) so a regression that drops a check's branch coverage fails
+# CI instead of sliding by. The floor sits a couple points under actual to
+# absorb churn without being vacuous.
 addopts = "-ra --cov=schema_firewall --cov-report=term-missing --cov-fail-under=90"
 testpaths = ["tests"]
 
