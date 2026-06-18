@@ -91,7 +91,7 @@ The library is in production use today as a pinned dep of [`nyc-real-estate-pred
 
 - **Statistical leakage detection triggers on the bundled California housing demo.** Build a target-mean-encoded feature on rounded lat/lon buckets — Ridge regression returns R² = 0.9495 (leaky). Apply the same target encoding per train fold only — R² collapses to 0.4384 (honest). Both `check_leakage` and `check_stateless` raise on the leaky pipeline. Reproducible in 60 seconds via [`examples/leakage_demo.ipynb`](examples/leakage_demo.ipynb).
 
-- **Statelessness holds under subset perturbation.** `check_stateless` runs the user pipeline on the full frame, then on a one-row subset. Any transform whose per-row output depends on other rows (frequency encoders, target-mean encoders, ComBat-style global normalisation) fails this invariant by construction. Default samples five spread indices to avoid being fooled by a singleton-group row 0.
+- **Statelessness holds under subset perturbation.** `check_stateless` runs the user pipeline on the full frame, then on a one-row subset. Any transform whose per-row output depends on other rows (frequency encoders, target-mean encoders, ComBat-style global normalisation) fails this invariant by construction. The default spot-check deliberately targets the rows a global transform is most likely to edit — each numeric column's min/max row (winsorise/clip/quantile filters touch the tails), every NaN-bearing row (`fillna(df.mean())` edits exactly those), and a fixed-stride spread across the rest — rather than being fooled by a plain stride sample that misses a tail- or NaN-only edit. Pass an explicit `sample_indices` to check more rows; checking every row is the strongest guarantee.
 
 - **Forbidden-column gate raises on the documented set.** `nyc-real-estate-predictor` configures `SchemaContract(forbidden_columns=frozenset({"SALE PRICE", "SALE DATE", "PRICE_PER_SQFT", "TARGET", "log_price"}))`. The 18-test adversarial suite in the flagship asserts that `check_schema` raises on each of these columns presented under several disguises.
 
@@ -114,7 +114,7 @@ Three checks. One contract class. Four exceptions. That's the whole library.
 
 ## Design constraints (locked)
 
-- **≤ 500 LoC** of core implementation across `src/schema_firewall/` — currently ~300 lines of code (~400 including blanks and comments), comfortably within budget.
+- **≤ 500 LoC** of core implementation across `src/schema_firewall/` — currently 372 lines of code (515 including blanks and comments). Verify: `find src/schema_firewall -name '*.py' -exec grep -vhE '^\s*(#|$)' {} + | wc -l`.
 - **3 public check functions** — `check_leakage`, `check_schema`, `check_stateless`. No more.
 - **An adversarial test for every documented failure mode** (and a regression test for each fixed bug).
 - **Three dependencies:** `numpy`, `pandas`, `scikit-learn`. Nothing else.
