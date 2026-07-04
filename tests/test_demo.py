@@ -1,10 +1,14 @@
 """Pins the README's quoted demo R² values against drift.
 
-The README documents `examples/leakage_demo.py` produces leaky R² = 0.9495
-and honest R² = 0.4384. Without a test, sklearn or numpy version drift could
-silently move those numbers, leaving the README stale. This module runs the
-demo as a subprocess (the actual user experience) and asserts the printed
-R² values stay within ±0.005 of the documented numbers.
+The README's "Verified invariants under execution" section documents that
+`examples/leakage_demo.py` produces a specific leaky R² and honest R².
+Without a test, sklearn or numpy version drift could silently move those
+numbers, leaving the README stale. This module parses the claimed values
+out of README.md itself (a hardcoded copy here once drifted: it cited a
+README line number that had moved), runs the demo as a subprocess (the
+actual user experience), and asserts the printed R² values stay within
+±0.005 of the README's claim. The README text is the single source of
+truth; this test cannot drift from it.
 
 A failure here means EITHER (a) drift the README to the new numbers, OR
 (b) pin a tighter dependency floor to lock the old numbers. Both are
@@ -21,11 +25,25 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 DEMO_PATH = REPO_ROOT / "examples" / "leakage_demo.py"
+README_PATH = REPO_ROOT / "README.md"
 
-# README claims at README.md:87
-README_LEAKY_R2 = 0.9495
-README_HONEST_R2 = 0.4384
 DRIFT_TOLERANCE = 0.005
+
+
+def _readme_claimed_r2() -> tuple[float, float]:
+    """Extract the (leaky, honest) R² values the README claims for the demo.
+
+    Greps the README so the claim is read from where it lives, not copied
+    here — the copy is what drifted last time. Each pattern must match
+    exactly once; zero or multiple matches mean the README wording changed
+    and this parser must be updated deliberately.
+    """
+    text = README_PATH.read_text(encoding="utf-8")
+    leaky = re.findall(r"R\S* = (\d+\.\d+) \(leaky\)", text)
+    honest = re.findall(r"R\S* collapses to (\d+\.\d+) \(honest\)", text)
+    assert len(leaky) == 1, f"expected exactly one leaky-R² claim in README, found {leaky}"
+    assert len(honest) == 1, f"expected exactly one honest-R² claim in README, found {honest}"
+    return float(leaky[0]), float(honest[0])
 
 
 def _run_demo() -> subprocess.CompletedProcess[str]:
@@ -55,9 +73,10 @@ def test_demo_runs_and_R2_matches_README_claim():
     Bundled assertion (single subprocess invocation) covers three things:
     1. Demo completes — proves catch_leak_via_leakage_check still detects
        the leak (it raises AssertionError if check_leakage stops tripping).
-    2. Leaky R² ≈ 0.9495 (README.md:87).
-    3. Honest R² ≈ 0.4384 (README.md:87).
+    2. Leaky R² matches the README's quoted value.
+    3. Honest R² matches the README's quoted value.
     """
+    readme_leaky_r2, readme_honest_r2 = _readme_claimed_r2()
     result = _run_demo()
 
     assert result.returncode == 0, (
@@ -69,9 +88,9 @@ def test_demo_runs_and_R2_matches_README_claim():
     leaky_r2 = _parse_r2(result.stdout, "leaky")
     honest_r2 = _parse_r2(result.stdout, "honest")
 
-    assert abs(leaky_r2 - README_LEAKY_R2) < DRIFT_TOLERANCE, (
-        f"leaky R² drift: {leaky_r2:.4f} vs README {README_LEAKY_R2}"
+    assert abs(leaky_r2 - readme_leaky_r2) < DRIFT_TOLERANCE, (
+        f"leaky R² drift: {leaky_r2:.4f} vs README {readme_leaky_r2}"
     )
-    assert abs(honest_r2 - README_HONEST_R2) < DRIFT_TOLERANCE, (
-        f"honest R² drift: {honest_r2:.4f} vs README {README_HONEST_R2}"
+    assert abs(honest_r2 - readme_honest_r2) < DRIFT_TOLERANCE, (
+        f"honest R² drift: {honest_r2:.4f} vs README {readme_honest_r2}"
     )

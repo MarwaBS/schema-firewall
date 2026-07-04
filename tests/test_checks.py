@@ -178,7 +178,9 @@ def test_leakage_handles_low_cardinality_classification_target():
 
 @pytest.mark.parametrize(
     "forbidden",
-    ["SALE PRICE", "PRICE_PER_SQFT", "target", "TARGET", "log_price"],
+    # The first five are the exact forbidden set the README documents for the
+    # flagship integration; the README points here as the verifiable proof.
+    ["SALE PRICE", "SALE DATE", "PRICE_PER_SQFT", "TARGET", "log_price", "target"],
 )
 def test_schema_rejects_forbidden_column(forbidden):
     x = pd.DataFrame({forbidden: [1.0, 2.0], "safe": [3.0, 4.0]})

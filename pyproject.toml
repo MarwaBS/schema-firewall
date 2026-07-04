@@ -66,7 +66,14 @@ branch = true
 source = ["schema_firewall"]
 
 [tool.mypy]
-python_version = "3.10"
+# Deliberately NO hardcoded python_version: mypy checks at the running
+# interpreter, so each CI matrix job (3.10-3.13) validates its own resolved
+# dependency universe. Pinning 3.10 here broke fresh installs on newer
+# interpreters: they resolve numpy >= 2.5 (requires-python >= 3.12), whose
+# stubs use PEP 695 `type` statements that a 3.10-mode mypy rejects with a
+# syntax error. The 3.10 floor is still enforced -- by the 3.10 matrix job,
+# which resolves a 3.10-compatible numpy (< 2.3, no `type` statements) and
+# type-checks the same source at that version.
 files = ["src"]
 warn_unused_ignores = true
 warn_redundant_casts = true
