@@ -214,5 +214,5 @@ ledger. Includes one behavioral change (see below).
 
 [Unreleased]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.2...HEAD
 [0.1.2]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/MarwaBS/schema-firewall/releases/tag/v0.1.0
+[0.1.1]: https://github.com/MarwaBS/schema-firewall/compare/ef5021df74e030cf90073d77089f9839677a154a...v0.1.1
+[0.1.0]: https://github.com/MarwaBS/schema-firewall/tree/ef5021df74e030cf90073d77089f9839677a154a
