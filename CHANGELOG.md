@@ -5,7 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.3] - 2026-06-16
+## [Unreleased]
+
+Everything below is staged as **v0.1.3** (`pyproject.toml` already carries
+the version) but is not on PyPI yet; this heading becomes `[0.1.3] - <date>`
+when the `v0.1.3` tag is pushed.
 
 Audit-driven hardening (2026-06): fixes a crash, two incorrect/ineffective
 checks, and several error-handling and tooling gaps. Each fix carries a
@@ -55,6 +59,19 @@ regression test.
   running the demo (and by `tests/test_demo.py`).
 
 ### CI / tooling
+- Removed the hardcoded `python_version = "3.10"` from `[tool.mypy]`: it made
+  the gate fail on any fresh install under Python >= 3.12 (which resolves
+  numpy >= 2.5, whose stubs use PEP 695 `type` statements — a syntax error in
+  3.10 mode). mypy now checks at the running interpreter, so each CI matrix
+  job validates its own resolved dependency universe; the 3.10 job still
+  enforces the 3.10 floor.
+- `release.yml` now refuses to publish when the pushed tag does not match the
+  `pyproject.toml` version, so a mistagged push cannot upload a wheel whose
+  version contradicts its tag.
+- `tests/test_demo.py` now parses the claimed R² values out of README.md
+  instead of hardcoding a copy next to a (previously drifted) line-number
+  citation — the README is the single source of truth and the reference
+  cannot drift again.
 - CI runs `ruff check`, `ruff format --check`, and `mypy src` (matching the
   CONTRIBUTING promise) and adds Python 3.13 to the matrix and classifiers.
 - Linting now covers `tests/` and `examples/` (previously excluded).
@@ -72,6 +89,9 @@ regression test.
 - README LoC figure refreshed to the verified current count (372 code / 515
   raw) with a one-line reproduce command, so the "≤ 500 LoC" budget claim can't
   silently rot again.
+- README's "18-test adversarial suite in the flagship" citation replaced with
+  what is verifiable from this repo: the parametrized forbidden-column test
+  here (now including `SALE DATE`) plus the flagship's consuming CI job.
 
 ## [0.1.2] - 2026-05-28
 
@@ -192,6 +212,7 @@ ledger. Includes one behavioral change (see below).
 - Adversarial test suite (27 collected tests at release time).
 - MIT license.
 
-[0.1.2]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/MarwaBS/schema-firewall/releases/tag/v0.1.0
