@@ -1,4 +1,4 @@
-"""schema-firewall — a tiny, adversarially-tested library that catches the
+"""schema-firewall -- a tiny, adversarially-tested library that catches the
 three leakage + schema bugs that keep sneaking into published ML results.
 
 Public API (three checks, one contract, four exceptions):

@@ -9,6 +9,7 @@ All logic is deterministic, stateless, and row-wise where applicable.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Hashable, Sequence
 from typing import Literal
 
@@ -22,8 +23,8 @@ from ._schema import SchemaContract
 # Below this many finite paired samples, the binned adjusted-MI estimate is
 # noise-dominated: independent/legit features can score as high as a real
 # non-monotone leak, so there is no honest threshold (and a 2-point correlation
-# is always |r|=1). Empirically, at >= 100 samples deterministic leaks —
-# including binary/k-class targets and non-monotone transforms — separate
+# is always |r|=1). Empirically, at >= 100 samples deterministic leaks --
+# including binary/k-class targets and non-monotone transforms -- separate
 # cleanly from noise (0% miss, 0 false positives across seeds). Below it, refuse
 # rather than guess.
 _MIN_SAMPLES = 100
@@ -72,10 +73,23 @@ def check_leakage(
     ``LabelEncoder``) before calling.
 
     ``mi_threshold`` is an adjusted-MI threshold in [0, 1] (default 0.2):
-    deterministic dependence — copies, k-class/binary target encodings, and
-    non-monotone transforms — lands well above it, while honest noisy predictors
-    and independent columns land near 0. At least ``100`` rows are required; bins
-    scale with sample size to keep the estimate stable.
+    deterministic dependence -- copies, k-class/binary target encodings, and
+    non-monotone transforms -- lands well above it. Independent and weakly
+    correlated columns land near 0, but the detector scores raw target
+    dependence, not its *source*: a genuinely strong honest predictor crosses
+    the threshold too. Measured (honest linear feature, 20 seeds, n=400): flags
+    ~0 up to ``|r| <= 0.80``, a minority (~15%) by ``|r| = 0.83``, and the
+    majority (~75%) by ``|r| = 0.85``. That is deliberate -- a leakage firewall
+    should surface any feature that nearly determines the target -- so read a
+    flag as "audit this column", not "proven leak". At least ``100`` rows are
+    required; bins scale with sample size to keep the estimate stable.
+
+    Composite operating point: a column fails if it crosses ANY detector, so the
+    effective gate is the STRICTEST of the three. On a *linear* feature the MI
+    detector (flagging by ``|r| ~ 0.85``) therefore binds well before the Pearson
+    / Spearman cap (``max_abs_corr = 0.95``) ever would -- i.e. the practical
+    leakage threshold for a linear predictor is ``|r| ~ 0.85``, not 0.95. Raise
+    ``mi_threshold`` if you want strong-but-honest linear features to pass.
 
     Raises:
         ValueError: fewer than ``100`` finite paired samples (leakage detection
@@ -85,6 +99,22 @@ def check_leakage(
             lists every violating column with all three metrics.
     """
     numeric = X.select_dtypes(include=[np.number])
+
+    # The detectors are defined on numeric columns only, so non-numeric columns
+    # are skipped -- but silence there is dangerous: a stringified/encoded COPY
+    # of the target sitting in an object column would pass the firewall
+    # unexamined. Warn so the caller knows those columns were NOT inspected and
+    # can encode them first if they should be.
+    skipped = [c for c in X.columns if c not in numeric.columns]
+    if skipped:
+        warnings.warn(
+            "check_leakage inspects numeric columns only; NOT checked for "
+            f"leakage: {skipped}. A stringified/encoded target copy in a "
+            "non-numeric column is invisible to this check -- encode such "
+            "columns (e.g. LabelEncoder) before calling if they must be audited.",
+            stacklevel=2,
+        )
+
     if numeric.empty:
         return
 
@@ -262,9 +292,9 @@ def check_stateless(
 
     if sample_indices is None:
         # Spot-check the rows a global transform is most likely to touch:
-        #  - each numeric column's MIN and MAX rows — winsorise/clip/robust-scale
+        #  - each numeric column's MIN and MAX rows -- winsorise/clip/robust-scale
         #    and quantile filters edit the tails;
-        #  - every row holding a NaN in any column — global-mean/median
+        #  - every row holding a NaN in any column -- global-mean/median
         #    imputation (df.fillna(df.mean())) edits exactly those, and a
         #    one-row subset can't reconstruct the global statistic;
         #  - an even fixed-stride spread for everything else.
@@ -310,7 +340,7 @@ def check_stateless(
         if len(single_out) == 0:
             # The full frame KEEPS this row but the one-row subset DROPS it: the
             # keep/drop decision depends on the other rows. That is exactly the
-            # state-dependence this check exists to catch — the old code skipped
+            # state-dependence this check exists to catch -- the old code skipped
             # it with `continue`, a false negative on global-statistic filters.
             raise StatelessnessError(
                 f"pipeline is state-dependent at index {idx!r}: the row is kept "
