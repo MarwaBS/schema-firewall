@@ -1,4 +1,4 @@
-"""SchemaContract — declarative input contract consumed by check_schema."""
+"""SchemaContract -- declarative input contract consumed by check_schema."""
 
 from __future__ import annotations
 

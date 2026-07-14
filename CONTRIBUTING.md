@@ -13,7 +13,9 @@ pip install -e .[dev]
 pytest
 ```
 
-Expected: 30 tests pass in under 20 seconds.
+Expected: the full suite passes in under 20 seconds. (No fixed count here on
+purpose — it drifts every time a test is added; `pytest` reports the current
+number.)
 
 To also run static analysis:
 
@@ -83,10 +85,11 @@ Out-of-scope without prior issue discussion:
   pandas and scikit-learn (no upstream stubs).
 - Line length: 100 characters (also from `pyproject.toml`).
 - ASCII source. Non-ASCII characters in docstrings and comments
-  caused cp1252 console crashes on Windows in 0.1.1 — the 0.1.x
-  series now keeps source ASCII-only to avoid that crash class.
-  Use `->` for arrows, `rho` / `union` for Greek letters, `--` for
-  em-dashes.
+  caused cp1252 console crashes on Windows in 0.1.1, so the 0.1.x
+  series keeps every `.py` under `src/` and `tests/` ASCII-only.
+  This is **enforced**, not just requested: `test_source_is_ascii_only`
+  fails the build on any non-ASCII byte. Use `->` for arrows,
+  `rho` / `union` for Greek letters, `--` for em-dashes.
 
 ## Release process (maintainers only)
 

@@ -1,13 +1,13 @@
-"""Pins the README's quoted demo R² values against drift.
+"""Pins the README's quoted demo R^2 values against drift.
 
 The README's "Verified invariants under execution" section documents that
-`examples/leakage_demo.py` produces a specific leaky R² and honest R².
+`examples/leakage_demo.py` produces a specific leaky R^2 and honest R^2.
 Without a test, sklearn or numpy version drift could silently move those
 numbers, leaving the README stale. This module parses the claimed values
 out of README.md itself (a hardcoded copy here once drifted: it cited a
 README line number that had moved), runs the demo as a subprocess (the
-actual user experience), and asserts the printed R² values stay within
-±0.005 of the README's claim. The README text is the single source of
+actual user experience), and asserts the printed R^2 values stay within
++/-0.005 of the README's claim. The README text is the single source of
 truth; this test cannot drift from it.
 
 A failure here means EITHER (a) drift the README to the new numbers, OR
@@ -31,18 +31,18 @@ DRIFT_TOLERANCE = 0.005
 
 
 def _readme_claimed_r2() -> tuple[float, float]:
-    """Extract the (leaky, honest) R² values the README claims for the demo.
+    """Extract the (leaky, honest) R^2 values the README claims for the demo.
 
     Greps the README so the claim is read from where it lives, not copied
-    here — the copy is what drifted last time. Each pattern must match
+    here -- the copy is what drifted last time. Each pattern must match
     exactly once; zero or multiple matches mean the README wording changed
     and this parser must be updated deliberately.
     """
     text = README_PATH.read_text(encoding="utf-8")
     leaky = re.findall(r"R\S* = (\d+\.\d+) \(leaky\)", text)
     honest = re.findall(r"R\S* collapses to (\d+\.\d+) \(honest\)", text)
-    assert len(leaky) == 1, f"expected exactly one leaky-R² claim in README, found {leaky}"
-    assert len(honest) == 1, f"expected exactly one honest-R² claim in README, found {honest}"
+    assert len(leaky) == 1, f"expected exactly one leaky-R^2 claim in README, found {leaky}"
+    assert len(honest) == 1, f"expected exactly one honest-R^2 claim in README, found {honest}"
     return float(leaky[0]), float(honest[0])
 
 
@@ -59,8 +59,8 @@ def _run_demo() -> subprocess.CompletedProcess[str]:
 
 
 def _parse_r2(stdout: str, label: str) -> float:
-    # Demo prints e.g. "  leaky                R² = 0.9495" — `R\S*` munches
-    # the "²" superscript without depending on its codepoint.
+    # Demo prints e.g. "  leaky                R^2 = 0.9495" -- `R\S*` munches
+    # the "^2" superscript without depending on its codepoint.
     pattern = rf"{label}\s+R\S*\s*=\s*(\d+\.\d+)"
     match = re.search(pattern, stdout)
     assert match, f"R-squared for {label!r} not found in demo output:\n{stdout}"
@@ -68,13 +68,13 @@ def _parse_r2(stdout: str, label: str) -> float:
 
 
 def test_demo_runs_and_R2_matches_README_claim():
-    """Demo must exit 0 and both quoted R² values must be within ±0.005.
+    """Demo must exit 0 and both quoted R^2 values must be within +/-0.005.
 
     Bundled assertion (single subprocess invocation) covers three things:
-    1. Demo completes — proves catch_leak_via_leakage_check still detects
+    1. Demo completes -- proves catch_leak_via_leakage_check still detects
        the leak (it raises AssertionError if check_leakage stops tripping).
-    2. Leaky R² matches the README's quoted value.
-    3. Honest R² matches the README's quoted value.
+    2. Leaky R^2 matches the README's quoted value.
+    3. Honest R^2 matches the README's quoted value.
     """
     readme_leaky_r2, readme_honest_r2 = _readme_claimed_r2()
     result = _run_demo()
@@ -89,8 +89,8 @@ def test_demo_runs_and_R2_matches_README_claim():
     honest_r2 = _parse_r2(result.stdout, "honest")
 
     assert abs(leaky_r2 - readme_leaky_r2) < DRIFT_TOLERANCE, (
-        f"leaky R² drift: {leaky_r2:.4f} vs README {readme_leaky_r2}"
+        f"leaky R^2 drift: {leaky_r2:.4f} vs README {readme_leaky_r2}"
     )
     assert abs(honest_r2 - readme_honest_r2) < DRIFT_TOLERANCE, (
-        f"honest R² drift: {honest_r2:.4f} vs README {readme_honest_r2}"
+        f"honest R^2 drift: {honest_r2:.4f} vs README {readme_honest_r2}"
     )
