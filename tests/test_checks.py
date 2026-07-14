@@ -24,9 +24,9 @@ from schema_firewall import (
     check_stateless,
 )
 
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # Fixtures
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -50,9 +50,9 @@ def clean_frame() -> tuple[pd.DataFrame, pd.Series]:
     return df, y
 
 
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # 1. check_leakage
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 
 def test_leakage_accepts_independent_features(clean_frame):
@@ -100,11 +100,26 @@ def test_leakage_raises_on_constant_target(clean_frame):
         check_leakage(x, y)
 
 
-def test_leakage_passes_with_non_numeric_columns(clean_frame):
+def test_leakage_warns_on_skipped_non_numeric_columns(clean_frame):
+    """Non-numeric columns are not inspected -- but that must be surfaced, not
+    silent. A caller with an object column gets a warning naming it, so a
+    stringified target copy hiding there can't pass the firewall unnoticed."""
     x, y = clean_frame
     x = x.copy()
     x["category"] = pd.Series(["a", "b", "c"] * (len(x) // 3 + 1))[: len(x)]
-    check_leakage(x, y)  # no raise — non-numerics ignored
+    with pytest.warns(UserWarning, match=r"NOT checked for leakage.*category"):
+        check_leakage(x, y)  # no raise, but warns that 'category' was skipped
+
+
+def test_leakage_warns_when_stringified_target_copy_is_unchecked(clean_frame):
+    """The dangerous case the warning exists for: a string copy of the target in
+    an object column. The detector can't inspect it (non-numeric), so it can't
+    catch the leak -- but it MUST warn that this column went unchecked."""
+    x, y = clean_frame
+    x = x.copy()
+    x["y_str"] = pd.Series(y).astype(str).to_numpy()  # object-dtype target copy
+    with pytest.warns(UserWarning, match=r"NOT checked for leakage.*y_str"):
+        check_leakage(x, y)
 
 
 def test_leakage_error_message_contains_all_three_metrics(clean_frame):
@@ -137,7 +152,10 @@ def test_leakage_respects_custom_thresholds(clean_frame):
 def test_leakage_empty_numeric_frame_passes():
     x = pd.DataFrame({"cat": ["a", "b", "c"]})
     y = pd.Series([1.0, 2.0, 3.0])
-    check_leakage(x, y)  # no raise
+    # No numeric columns to inspect -> no raise, but the object column is warned
+    # about (it was not checked), consistent with the skipped-column contract.
+    with pytest.warns(UserWarning, match=r"NOT checked for leakage.*cat"):
+        check_leakage(x, y)
 
 
 def test_leakage_handles_low_cardinality_classification_target():
@@ -162,7 +180,7 @@ def test_leakage_handles_low_cardinality_classification_target():
             "c": rng.integers(0, 1000, n),
         }
     )
-    check_leakage(x_independent, y3)  # no raise — was the bug class
+    check_leakage(x_independent, y3)  # no raise -- was the bug class
 
     # Target-copy feature: must still be caught even for low-cardinality y.
     x_leaky = x_independent.copy()
@@ -171,9 +189,9 @@ def test_leakage_handles_low_cardinality_classification_target():
         check_leakage(x_leaky, y3)
 
 
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # 2. check_schema
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -215,12 +233,12 @@ def test_schema_rejects_dtype_mismatch():
 def test_schema_dtype_check_skips_absent_columns():
     x = pd.DataFrame({"sqft": [100, 200]})
     contract = SchemaContract(dtypes={"missing_col": "float64"})
-    check_schema(x, contract)  # no raise — missing cols ignored here
+    check_schema(x, contract)  # no raise -- missing cols ignored here
 
 
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # 3. check_stateless
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 
 def _row_wise_pipeline(df: pd.DataFrame) -> pd.DataFrame:
@@ -230,7 +248,7 @@ def _row_wise_pipeline(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _mean_encoding_leak(df: pd.DataFrame) -> pd.DataFrame:
-    """Dataset-wide mean → per-row encoded feature (classic leak)."""
+    """Dataset-wide mean -> per-row encoded feature (classic leak)."""
     mean_sqft = df["sqft"].mean()
     out = df.copy()
     out["sqft_relative"] = out["sqft"] - mean_sqft
@@ -307,9 +325,9 @@ def test_stateless_raises_on_unknown_sample_index(clean_frame):
         check_stateless(stateless_pipeline, x, sample_indices=[bogus_index])
 
 
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # 4. Package-level
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 
 def test_version_is_string():
@@ -331,9 +349,9 @@ def test_public_api_shape():
     assert issubclass(sf.StatelessnessError, sf.SchemaFirewallError)
 
 
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # 5. Audit regressions (2026-06)
-# ───────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 
 def test_leakage_single_nan_does_not_crash(clean_frame):
@@ -387,10 +405,10 @@ def test_leakage_rejects_non_numeric_target(clean_frame):
 )
 def test_leakage_catches_non_monotone_dependence(transform, seed):
     """The MI detector must catch NON-monotone / discrete deterministic leakage
-    that Pearson AND Spearman miss — y = x**2, |x|, cos(3x), AND binary/k-class
+    that Pearson AND Spearman miss -- y = x**2, |x|, cos(3x), AND binary/k-class
     target encodings (the most common ML target shapes). The prior self-MI
     normalisation missed all of these; quantile binning then silently collapsed
-    binary targets to one bin (AMI ≡ 0). Parametrised over seeds because a single
+    binary targets to one bin (AMI == 0). Parametrised over seeds because a single
     seed is exactly how the regression hid before."""
     rng = np.random.default_rng(seed)
     x = rng.normal(size=300)
@@ -404,7 +422,7 @@ def test_leakage_catches_non_monotone_dependence(transform, seed):
 
 def test_leakage_passes_legitimate_noisy_predictor():
     """A genuinely predictive but noisy feature (real signal + real noise, not a
-    deterministic encoding of the target) must NOT be flagged — adjusted MI
+    deterministic encoding of the target) must NOT be flagged -- adjusted MI
     measures shared information, so noise keeps an honest predictor well below
     threshold. Guards against false positives on real features."""
     rng = np.random.default_rng(1)
@@ -444,7 +462,7 @@ def test_stateless_rejects_duplicate_index():
 def test_stateless_catches_global_statistic_row_filter(clean_frame):
     """A filter on a FULL-frame statistic (median) is state-dependent: a kept
     row processed alone has the row as its own median and is dropped, producing
-    an empty one-row output. The old code skipped that (`continue`) — a false
+    an empty one-row output. The old code skipped that (`continue`) -- a false
     negative on exactly the leak class this check targets."""
     x, _ = clean_frame
 
@@ -476,7 +494,7 @@ def test_stateless_catches_global_winsorizer(clean_frame):
 def test_stateless_catches_global_mean_imputation():
     """Global-mean imputation `df.fillna(df.mean())` is the canonical leakage
     bug (fit on full data). The NaN row processed alone can't reconstruct the
-    global mean, so it diverges from the full-frame output — caught because the
+    global mean, so it diverges from the full-frame output -- caught because the
     default spot-check now includes NaN-bearing rows, even when the NaN sits off
     the min/max/stride sample."""
     rng = np.random.default_rng(0)
@@ -530,3 +548,53 @@ def test_schema_dtype_accepts_equivalent_int_spellings(spec):
     rejected them against the actual 'int64'."""
     x = pd.DataFrame({"age": pd.Series([30, 40], dtype="int64")})
     check_schema(x, SchemaContract(dtypes={"age": spec}))  # no raise
+
+
+def test_leakage_false_positive_operating_point_is_pinned():
+    """Characterise the MI detector's false-positive boundary so the
+    docstring/CHANGELOG claims stay honest. The detector scores raw target
+    dependence, not its source, so an HONEST strong linear predictor trips it
+    too. Pin the measured band (seeded, deterministic): independent and weak
+    columns never flag; a near-deterministic predictor always does; the
+    documented transition is majority-flagged by |r|=0.85. Retuning
+    mi_threshold shifts these rates and fails this test, forcing the docs to be
+    re-measured rather than silently drifting.
+    """
+
+    def flag_rate(r: float, seeds: int = 20, n: int = 400) -> float:
+        hits = 0
+        for seed in range(seeds):
+            rng = np.random.default_rng(seed)
+            y = rng.standard_normal(n)
+            x = r * y + np.sqrt(max(0.0, 1.0 - r * r)) * rng.standard_normal(n)
+            try:
+                check_leakage(pd.DataFrame({"feat": x}), y)
+            except LeakageError:
+                hits += 1
+        return hits / seeds
+
+    # 0-FP floor: independent + weak honest predictors are never flagged.
+    assert flag_rate(0.0) == 0.0
+    assert flag_rate(0.75) == 0.0
+    # A near-deterministic predictor is always flagged (the detector's job).
+    assert flag_rate(0.95) == 1.0
+    # Documented transition: majority-flagged by |r|=0.85 (measured ~0.75).
+    assert flag_rate(0.85) >= 0.5
+
+
+def test_source_is_ascii_only():
+    """CONTRIBUTING promises ASCII-only source: a non-ASCII char in a docstring
+    or comment crashes import on a cp1252 (Windows) console, and this repo hit
+    exactly that. Enforce the promise mechanically -- every .py under src/ and
+    tests/ must be pure ASCII -- so it can never silently drift back."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    offenders = []
+    for p in sorted((root / "src").rglob("*.py")) + sorted((root / "tests").rglob("*.py")):
+        for lineno, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            bad = next((c for c in line if ord(c) > 127), None)
+            if bad is not None:
+                offenders.append(f"{p.relative_to(root)}:{lineno} U+{ord(bad):04X}")
+                break
+    assert not offenders, "non-ASCII source (breaks cp1252 import): " + "; ".join(offenders)

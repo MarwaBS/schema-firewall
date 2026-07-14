@@ -11,7 +11,7 @@ pip install schema-firewall
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **Production usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.0` in `requirements.txt` and re-validates the firewall integration in its `External Benchmark` CI job on every push. Directional coupling signal (pinned dep + consuming CI), not a semantic contract invariant.
+> **Production usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.0` in `requirements.txt` and re-validates the firewall integration in its `External Benchmark` CI job — which runs on a weekly schedule and on pushes/PRs that touch the benchmark's paths (it is path-filtered), not on literally every push. Directional coupling signal (pinned dep + consuming CI), not a semantic contract invariant.
 
 ---
 
@@ -87,7 +87,7 @@ If you've ever applied `.mean()`, `.value_counts()`, `TargetEncoder`, or ComBat/
 
 ## Verified invariants under execution
 
-The library is in production use today as a pinned dep of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor). The flagship's `External Benchmark` CI job re-checks these invariants against the published wheel on every push to `main`:
+The library is in production use today as a pinned dep of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor). The flagship's `External Benchmark` CI job re-checks these invariants against the published wheel on a weekly schedule and on pushes/PRs touching the benchmark's paths (the job is path-filtered):
 
 - **Statistical leakage detection triggers on the bundled California housing demo.** Build a target-mean-encoded feature on rounded lat/lon buckets — Ridge regression returns R² = 0.9495 (leaky). Apply the same target encoding per train fold only — R² collapses to 0.4384 (honest). Both `check_leakage` and `check_stateless` raise on the leaky pipeline. Reproducible in 60 seconds via [`examples/leakage_demo.ipynb`](examples/leakage_demo.ipynb).
 

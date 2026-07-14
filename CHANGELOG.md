@@ -38,18 +38,22 @@ regression test.
 
 ### Changed
 - **MI detector rebuilt as adjusted (chance-corrected) mutual information** on
-  sample-size-adaptive bins. The previous design (continuous kNN MI divided by a
-  self-MI baseline) was so deflated it only fired on an exact copy — it caught
-  nothing Pearson/Spearman didn't, and **missed non-monotone leakage entirely**
-  (`y = x**2` slipped through). A first rebuild then silently collapsed
+  sample-size-adaptive bins. The previous design (continuous kNN MI from
+  `sklearn.feature_selection.mutual_info_regression`, normalised by the target's
+  64-bin histogram Shannon entropy) was deflated on continuous targets and
+  **missed non-monotone leakage** (`y = x**2` slipped through until a fix forced
+  it). A later rebuild then silently collapsed
   **binary/low-cardinality targets** to one bin (AMI ≡ 0, every 0/1 target
   invisible). The final detector discretises low-cardinality values one-per-bin
   and continuous values into sqrt(n) quantile bins, and scores adjusted MI:
   genuinely in `[0, 1]`, ~0 under independence regardless of sample size, ~1
   when a feature determines the target — copy, binary/k-class encoding, OR
-  non-monotone transform — and leaves honest noisy predictors alone. Verified
-  0% miss / 0 false positives across these cases and seeds at n >= 100. Default
-  `mi_threshold` recalibrated to `0.2`.
+  non-monotone transform. Verified 0% miss on those leak fixtures and 0 false
+  positives on independent / weakly-correlated columns, across seeds at n >= 100.
+  It scores raw target dependence, not its source, so a *strong honest linear*
+  predictor also crosses the threshold (measured: majority-flagged by `|r| >=
+  0.85`) — deliberate for a leakage firewall; see the `check_leakage` docstring.
+  Default `mi_threshold` recalibrated to `0.2`.
 - The example demo's `check_stateless` branch now exits non-zero if the check
   misses the leak, so the README's "both checks raise" claim is enforced by
   running the demo (and by `tests/test_demo.py`).
