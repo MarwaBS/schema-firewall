@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 
 @dataclass(frozen=True)
@@ -24,7 +26,26 @@ class SchemaContract:
 
     forbidden_columns: frozenset[str] = field(default_factory=frozenset)
     required_columns: frozenset[str] = field(default_factory=frozenset)
-    dtypes: dict[str, str] | None = None
+    dtypes: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        # Copy then wrap read-only, so the contract cannot be rewritten after
+        # construction -- neither by item assignment nor through the caller's dict.
+        if self.dtypes is not None:
+            object.__setattr__(self, "dtypes", MappingProxyType(dict(self.dtypes)))
+
+    # A mappingproxy cannot be pickled; ship a plain dict across the boundary and
+    # re-freeze on load, so contracts survive joblib/multiprocessing.
+    def __getstate__(self) -> dict[str, object]:
+        state = dict(self.__dict__)
+        if self.dtypes is not None:
+            state["dtypes"] = dict(self.dtypes)
+        return state
+
+    def __setstate__(self, state: dict[str, object]) -> None:
+        for key, value in state.items():
+            object.__setattr__(self, key, value)
+        self.__post_init__()
 
 
 __all__ = ["SchemaContract"]

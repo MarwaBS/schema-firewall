@@ -36,6 +36,6 @@ jobs:
       - name: Format check (ruff)
         run: ruff format --check .
       - name: Type-check (mypy)
-        run: mypy src
+        run: mypy src tests
       - name: Run pytest
         run: pytest
