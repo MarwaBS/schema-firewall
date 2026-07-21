@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "schema-firewall"
-version = "0.1.3"
+version = "0.2.0"
 description = "Three checks that catch the leakage + schema bugs that slip past peer review: target-correlated features, schema violations, and state-dependent transforms."
 readme = "README.md"
 license = { text = "MIT" }
@@ -74,7 +74,7 @@ source = ["schema_firewall"]
 # syntax error. The 3.10 floor is still enforced -- by the 3.10 matrix job,
 # which resolves a 3.10-compatible numpy (< 2.3, no `type` statements) and
 # type-checks the same source at that version.
-files = ["src"]
+files = ["src", "tests"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 

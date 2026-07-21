@@ -162,10 +162,9 @@ def test_leakage_handles_low_cardinality_classification_target():
     """A low-cardinality *numeric* classification target (<= 5 classes) must
     not false-positive on independent features, yet still catch a target copy.
 
-    The MI detector uses adjusted (chance-corrected) mutual information on
-    quantile bins, so a 3-class integer target is handled cleanly: independent
-    features land near 0 (AMI corrects for chance regardless of cardinality) and
-    a copy lands at ~1.0. Pins that behaviour against future regressions."""
+    The MI detector uses adjusted (chance-corrected) mutual information, so a
+    3-class integer target is handled cleanly: independent features land near 0
+    (AMI corrects for chance regardless of cardinality) and a copy lands at ~1.0."""
     rng = np.random.default_rng(0)
     n = 200
 
@@ -180,7 +179,7 @@ def test_leakage_handles_low_cardinality_classification_target():
             "c": rng.integers(0, 1000, n),
         }
     )
-    check_leakage(x_independent, y3)  # no raise -- was the bug class
+    check_leakage(x_independent, y3)  # independent features: no raise
 
     # Target-copy feature: must still be caught even for low-cardinality y.
     x_leaky = x_independent.copy()
@@ -214,6 +213,13 @@ def test_schema_accepts_clean_frame():
         required_columns=frozenset({"sqft"}),
     )
     check_schema(x, contract)  # no raise
+
+
+def test_schema_rejects_duplicate_columns():
+    """Duplicate column names in X fail a clear precondition."""
+    x = pd.DataFrame([[1, 2, 3]], columns=["a", "a", "b"])
+    with pytest.raises(ValueError, match="duplicate"):
+        check_schema(x, SchemaContract(dtypes={"a": "int64"}))
 
 
 def test_schema_rejects_missing_required_column():
@@ -293,9 +299,12 @@ def test_stateless_catches_nondeterministic_pipeline(clean_frame):
         check_stateless(_non_deterministic_pipeline, x)
 
 
-def test_stateless_empty_frame_returns_silently():
+def test_stateless_refuses_empty_frame():
+    """A 0-row frame has nothing to spot-check, so it is refused like a 1-row
+    frame -- not passed vacuously."""
     empty = pd.DataFrame({"sqft": []})
-    check_stateless(lambda df: df, empty)  # no raise
+    with pytest.raises(StatelessnessError, match="at least 2 rows"):
+        check_stateless(lambda df: df, empty)
 
 
 def test_stateless_propagates_pipeline_exceptions(clean_frame):
@@ -308,11 +317,72 @@ def test_stateless_propagates_pipeline_exceptions(clean_frame):
         check_stateless(broken, x)
 
 
+def test_stateless_default_spot_check_cost_is_bounded_in_width(clean_frame):
+    """The default spot-check caps tail sampling at the highest-variance columns,
+    so cost stays bounded on a wide frame instead of scaling with column count."""
+    x, _ = clean_frame
+    x = x.copy()
+    rng = np.random.default_rng(0)
+    for i in range(60):  # 63 numeric columns, each with distinct min/max rows
+        x[f"c{i}"] = rng.permutation(len(x)).astype(float)
+
+    calls = {"n": 0}
+
+    def counting_pipeline(df):
+        calls["n"] += 1
+        out = df.copy()
+        out["z"] = out["sqft"] * 2
+        return out[["z"]]
+
+    check_stateless(counting_pipeline, x)
+    assert calls["n"] < 80, f"spot-check made {calls['n']} pipeline calls on 63 cols"
+
+
+def test_stateless_refuses_empty_output_from_nonempty_input(clean_frame):
+    """A pipeline that drops every row leaves no output rows to spot-check, so it
+    is refused rather than passed vacuously."""
+    x, _ = clean_frame
+
+    def drop_everything(df):
+        out = df.copy()
+        return out[out["sqft"] > out["sqft"].max() + 1]  # global stat -> empty
+
+    with pytest.raises(StatelessnessError, match="0 rows"):
+        check_stateless(drop_everything, x)
+
+
+def test_stateless_refuses_single_row_input():
+    """With a single-row input the only spot-check subset equals the full frame,
+    so even a mean-encoder passes vacuously. Refuse frames too small to check."""
+    df = pd.DataFrame({"x": [5.0]})
+
+    def mean_encode(frame):
+        out = frame.copy()
+        out["xr"] = out["x"] - out["x"].mean()
+        return out[["xr"]]
+
+    with pytest.raises(StatelessnessError, match="at least 2 rows"):
+        check_stateless(mean_encode, df)
+
+
+def test_stateless_clear_error_on_non_dataframe_return(clean_frame):
+    """A pipeline returning a non-DataFrame fails naming the return type, not
+    'non-deterministic'."""
+    x, _ = clean_frame
+    with pytest.raises(TypeError, match="DataFrame"):
+        check_stateless(lambda df: df["sqft"].to_numpy(), x)
+
+
+def test_stateless_raises_on_empty_sample_indices(clean_frame):
+    """An empty sample_indices list skipped the default row selection and ran zero
+    spot-checks -- a vacuous pass. It is now a caller error."""
+    x, _ = clean_frame
+    with pytest.raises(ValueError, match="empty"):
+        check_stateless(_row_wise_pipeline, x, sample_indices=[])
+
+
 def test_stateless_raises_on_unknown_sample_index(clean_frame):
-    """0.1.2 behavioral change: unknown sample_indices is a caller bug,
-    not something to silently skip. Previously the loop did `continue`
-    and the check could pass on zero actual spot-checks if every index
-    was typo'd."""
+    """Unknown sample_indices is a caller error, not silently skipped."""
     x, _ = clean_frame
 
     def stateless_pipeline(df):
@@ -355,9 +425,7 @@ def test_public_api_shape():
 
 
 def test_leakage_single_nan_does_not_crash(clean_frame):
-    """A single NaN in a numeric feature or in the target used to raise a raw
-    sklearn ValueError from mutual_info_regression, escaping the exception
-    hierarchy. NaNs are now dropped pairwise per column."""
+    """A single NaN in a feature or the target is dropped pairwise, not crashed on."""
     x, y = clean_frame
     x = x.copy()
     x.loc[5, "sqft"] = np.nan
@@ -384,8 +452,7 @@ def test_leakage_mi_norm_is_bounded_in_unit_interval(clean_frame):
 
 
 def test_leakage_rejects_non_numeric_target(clean_frame):
-    """A string classification target raised a raw 'could not convert string to
-    float'; it now fails with a clear LeakageError."""
+    """A non-numeric (string) target fails with a clear LeakageError."""
     x, _ = clean_frame
     y_str = pd.Series((["a", "b", "c"] * (len(x) // 3 + 1))[: len(x)])
     with pytest.raises(LeakageError, match="numeric target"):
@@ -404,12 +471,9 @@ def test_leakage_rejects_non_numeric_target(clean_frame):
     ],
 )
 def test_leakage_catches_non_monotone_dependence(transform, seed):
-    """The MI detector must catch NON-monotone / discrete deterministic leakage
-    that Pearson AND Spearman miss -- y = x**2, |x|, cos(3x), AND binary/k-class
-    target encodings (the most common ML target shapes). The prior self-MI
-    normalisation missed all of these; quantile binning then silently collapsed
-    binary targets to one bin (AMI == 0). Parametrised over seeds because a single
-    seed is exactly how the regression hid before."""
+    """The MI detector catches non-monotone/discrete deterministic leakage that
+    Pearson and Spearman miss -- y = x**2, |x|, cos(3x), and binary/k-class target
+    encodings. Parametrised over seeds because per-seed variance can mask it."""
     rng = np.random.default_rng(seed)
     x = rng.normal(size=300)
     leak = transform(x)
@@ -460,10 +524,9 @@ def test_stateless_rejects_duplicate_index():
 
 
 def test_stateless_catches_global_statistic_row_filter(clean_frame):
-    """A filter on a FULL-frame statistic (median) is state-dependent: a kept
-    row processed alone has the row as its own median and is dropped, producing
-    an empty one-row output. The old code skipped that (`continue`) -- a false
-    negative on exactly the leak class this check targets."""
+    """A filter on a full-frame statistic (median) is state-dependent: a kept row
+    processed alone is its own median and gets dropped, so its one-row output is
+    empty."""
     x, _ = clean_frame
 
     def global_median_filter(df):
@@ -512,9 +575,7 @@ def test_stateless_catches_global_mean_imputation():
 
 
 def test_stateless_names_index_preservation_precondition(clean_frame):
-    """An index-resetting pipeline used to surface as a confusing
-    'sample_indices not in raw.index' error the caller never caused. It now
-    fails naming the index-preservation precondition."""
+    """An index-resetting pipeline fails naming the index-preservation precondition."""
     x, _ = clean_frame
     x = x.copy()
     x.index = [f"row_{i}" for i in range(len(x))]
@@ -529,8 +590,7 @@ def test_stateless_names_index_preservation_precondition(clean_frame):
 
 
 def test_stateless_clear_error_when_sample_index_dropped_from_output(clean_frame):
-    """Spot-checking a row the pipeline drops from its full output used to raise
-    a raw pandas KeyError; it now gives a clear message."""
+    """Spot-checking a row the pipeline drops from its output gives a clear error."""
     x, _ = clean_frame
 
     def drop_label_zero(df):
@@ -540,6 +600,63 @@ def test_stateless_clear_error_when_sample_index_dropped_from_output(clean_frame
 
     with pytest.raises(ValueError, match="dropped by pipeline_fn"):
         check_stateless(drop_label_zero, x, sample_indices=[0])
+
+
+def test_schema_contract_dtypes_is_immutable():
+    """The dtypes mapping is read-only: item assignment on a 'frozen' contract
+    raises."""
+    c = SchemaContract(dtypes={"age": "int64"})
+    with pytest.raises(TypeError):
+        c.dtypes["age"] = "object"
+
+
+def test_schema_contract_does_not_alias_caller_dtypes():
+    """The contract holds a copy of the input dict, so mutating the caller's dict
+    does not change it."""
+    d = {"age": "int64"}
+    c = SchemaContract(dtypes=d)
+    d["age"] = "object"
+    assert c.dtypes is not None and c.dtypes["age"] == "int64"
+
+
+def test_schema_contract_pickle_round_trip():
+    """A contract survives pickling (joblib/multiprocessing) and comes back both
+    equal and still immutable."""
+    import pickle
+
+    c = SchemaContract(
+        forbidden_columns=frozenset({"TARGET"}),
+        dtypes={"age": "int64"},
+    )
+    restored = pickle.loads(pickle.dumps(c))
+    assert restored == c
+    with pytest.raises(TypeError):
+        restored.dtypes["age"] = "object"
+    assert pickle.loads(pickle.dumps(SchemaContract())) == SchemaContract()
+
+
+def test_schema_contract_attributes_are_frozen():
+    """The documented 'frozen' promise: attribute rebinding raises."""
+    from dataclasses import FrozenInstanceError
+
+    c = SchemaContract(required_columns=frozenset({"a"}))
+    with pytest.raises(FrozenInstanceError):
+        c.required_columns = frozenset({"b"})
+
+
+def test_schema_category_dtype_accepts_any_categorical():
+    """An unparameterised `{"c": "category"}` contract accepts any CategoricalDtype
+    (exact-categories equality would always be False)."""
+    x = pd.DataFrame({"c": pd.Series(["a", "b", "a"], dtype="category")})
+    check_schema(x, SchemaContract(dtypes={"c": "category"}))  # no raise
+
+
+def test_schema_category_dtype_still_rejects_non_categorical():
+    """The relaxed category match must not over-accept: an object column is not
+    categorical and must still fail a `{"c": "category"}` contract."""
+    x = pd.DataFrame({"c": ["a", "b", "a"]})  # object dtype, not categorical
+    with pytest.raises(SchemaError, match="c"):
+        check_schema(x, SchemaContract(dtypes={"c": "category"}))
 
 
 @pytest.mark.parametrize("spec", ["int64", "i8", "<i8"])
@@ -580,6 +697,224 @@ def test_leakage_false_positive_operating_point_is_pinned():
     assert flag_rate(0.95) == 1.0
     # Documented transition: majority-flagged by |r|=0.85 (measured ~0.75).
     assert flag_rate(0.85) >= 0.5
+
+
+def test_leakage_warns_on_columns_skipped_for_high_missingness(clean_frame):
+    """A numeric column with too few finite paired rows to assess is surfaced as a
+    warning naming it, not silently skipped."""
+    x, y = clean_frame
+    x = x.copy()
+    leak = y.to_numpy().astype(float).copy()
+    leak[:150] = np.nan  # 50 finite paired rows < the 100-sample floor
+    x["sparse_leak"] = leak
+    with pytest.warns(UserWarning, match=r"finite paired.*sparse_leak"):
+        check_leakage(x, y)
+
+
+def test_leakage_rejects_2d_target(clean_frame):
+    """A 2-D target (one-column DataFrame) fails an up-front 1-D precondition."""
+    x, y = clean_frame
+    with pytest.raises(ValueError, match="1-dimensional"):
+        check_leakage(x, y.to_frame())
+
+
+def test_leakage_rejects_length_mismatch(clean_frame):
+    """X and y of different lengths fail a clear length precondition."""
+    x, y = clean_frame
+    with pytest.raises(ValueError, match="length"):
+        check_leakage(x, y.iloc[:-5])
+
+
+def test_leakage_rejects_duplicate_columns(clean_frame):
+    """Duplicate column names in X fail a clear precondition."""
+    x, y = clean_frame
+    x = x.copy()
+    x.columns = ["sqft", "sqft", "rooms"]  # duplicate label
+    with pytest.raises(ValueError, match="duplicate"):
+        check_leakage(x, y)
+
+
+def test_leakage_catches_bool_target_copy():
+    """A bool column is numeric (True/False == 1/0), so an exact bool copy of a
+    binary target is caught like any numeric copy."""
+    rng = np.random.default_rng(0)
+    n = 200
+    y = pd.Series(rng.integers(0, 2, n))
+    x = pd.DataFrame({"safe": rng.normal(size=n), "leaked": y.astype(bool).to_numpy()})
+    with pytest.raises(LeakageError, match="leaked"):
+        check_leakage(x, y)
+
+
+def test_leakage_zero_row_frame_raises_min_samples(clean_frame):
+    """A 0-row frame with numeric columns hits the min-samples precondition, not a
+    silent pass."""
+    x, y = clean_frame
+    with pytest.raises(ValueError, match="at least 100 finite samples"):
+        check_leakage(x.iloc[:0], y.iloc[:0])
+
+
+def test_leakage_realigns_permuted_target_index(clean_frame):
+    """A target with a permuted (same-labels) index is realigned to X before
+    comparison, so a shuffled y still catches a verbatim copy."""
+    x, y = clean_frame
+    x = x.copy()
+    x["leaked"] = y.to_numpy()
+    y_shuffled = y.sample(frac=1, random_state=1)  # same labels, different order
+    with pytest.raises(LeakageError, match="leaked"):
+        check_leakage(x, y_shuffled)
+
+
+def test_leakage_raises_on_unalignable_target_index(clean_frame):
+    """A target whose index is a DIFFERENT label set than X cannot be aligned
+    row-for-row; positional comparison would be a silent guess. Refuse instead."""
+    x, y = clean_frame
+    y_disjoint = y.copy()
+    y_disjoint.index = y_disjoint.index + 10_000
+    with pytest.raises(ValueError, match="align"):
+        check_leakage(x, y_disjoint)
+
+
+def _zero_inflated_square(sparsity: float, negfrac: float, n: int = 1000):
+    """Zero-inflated feature: (1-sparsity) nonzero rows, negfrac of them negative,
+    with a deterministic y = x**2 leak. `rng.random` is always consumed so the
+    draw order is stable regardless of negfrac."""
+    rng = np.random.default_rng(0)
+    k = int(round((1.0 - sparsity) * n))
+    idx = rng.choice(n, size=k, replace=False)
+    mags = rng.uniform(1.0, 10.0, k)
+    signs = np.where(rng.random(k) < negfrac, -1.0, 1.0)
+    x = np.zeros(n)
+    x[idx] = signs * mags
+    return x, x**2
+
+
+@pytest.mark.parametrize("sparsity", [0.95, 0.96, 0.97])
+def test_leakage_catches_zero_inflated_square_collapse_region(sparsity):
+    """At 95-97% zeros with a mixed-sign tail, y = x**2 is non-monotone (Pearson
+    and Spearman ~0) so detection rests on the MI pillar; quantile binning scored
+    this deterministic leak at adjusted MI 0.0, dense-rank binning scores ~0.9+."""
+    x, y = _zero_inflated_square(sparsity, negfrac=0.5)
+    with pytest.raises(LeakageError, match="leak"):
+        check_leakage(pd.DataFrame({"leak": x}), pd.Series(y))
+
+
+@pytest.mark.parametrize("sparsity", [0.5, 0.8, 0.9, 0.93, 0.99])
+@pytest.mark.parametrize("negfrac", [0.0, 0.5])
+def test_leakage_catches_zero_inflated_square_across_sparsity(sparsity, negfrac):
+    """The zero-inflated non-monotone leak must be caught across the sparsity
+    range, signed and unsigned -- a guard around the collapse band above."""
+    x, y = _zero_inflated_square(sparsity, negfrac)
+    with pytest.raises(LeakageError, match="leak"):
+        check_leakage(pd.DataFrame({"leak": x}), pd.Series(y))
+
+
+def test_stateless_catches_inplace_global_winsorizer(clean_frame):
+    """An in-place winsoriser that returns its input aliases first/second/raw, so
+    the determinism check would compare a frame to itself. The tail-clip leak is
+    caught via the spot-check."""
+    x, _ = clean_frame
+
+    def winsorize_inplace(df):
+        df["sqft"] = df["sqft"].clip(upper=df["sqft"].quantile(0.95))
+        return df
+
+    with pytest.raises(StatelessnessError, match="state-dependent"):
+        check_stateless(winsorize_inplace, x)
+
+
+def test_stateless_does_not_mutate_caller_frame(clean_frame):
+    """A verification tool must not modify what it verifies: the caller's frame is
+    unchanged after an in-place pipeline."""
+    x, _ = clean_frame
+    snapshot = x.copy()
+
+    def add_column_inplace(df):
+        df["sqft_doubled"] = df["sqft"] * 2
+        return df
+
+    check_stateless(add_column_inplace, x)  # stateless + deterministic: no raise
+    pd.testing.assert_frame_equal(x, snapshot)
+
+
+def test_checks_return_none_on_pass(clean_frame):
+    """The documented contract: each check returns None (not a truthy value) on a
+    clean input."""
+    x, y = clean_frame
+    assert check_leakage(x, y) is None
+    assert check_schema(x, SchemaContract(required_columns=frozenset({"sqft"}))) is None
+    assert check_stateless(_row_wise_pipeline, x) is None
+
+
+def test_schema_dtype_unrecognised_string_falls_back_to_exact_match():
+    """A dtype string pandas can't resolve falls back to an exact string compare
+    against the actual dtype, so a typo'd contract still fails loudly."""
+    x = pd.DataFrame({"a": [1, 2]})
+    with pytest.raises(SchemaError, match="a"):
+        check_schema(x, SchemaContract(dtypes={"a": "not_a_real_dtype"}))
+
+
+def test_safe_corr_rejects_unknown_method():
+    """_safe_corr guards against a bogus method name reaching it from an untyped
+    caller."""
+    from schema_firewall._checks import _safe_corr
+
+    with pytest.raises(ValueError, match="unknown correlation method"):
+        _safe_corr(np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.0, 3.0]), method="kendall")
+
+
+def test_leakage_spearman_exceeds_pearson_on_monotone_nonlinear(clean_frame):
+    """The Spearman pillar adds monotonic sensitivity beyond Pearson: a strictly
+    monotone but nonlinear function of the target scores Spearman > Pearson."""
+    x, y = clean_frame
+    x = x.copy()
+    yv = y.to_numpy()
+    x["monotone"] = np.exp((yv - yv.mean()) / yv.std())
+    try:
+        check_leakage(x, y)
+        pytest.fail("expected LeakageError")
+    except LeakageError as exc:
+        m = re.search(r"monotone: pearson=([0-9.]+) spearman=([0-9.]+)", str(exc))
+        assert m, str(exc)
+        assert float(m.group(2)) > float(m.group(1))
+
+
+def test_exactly_three_runtime_dependencies():
+    """The locked 'three dependencies, nothing else' promise."""
+    from importlib import metadata
+
+    runtime = {
+        r.split(";")[0].split(">")[0].split("<")[0].split("=")[0].strip()
+        for r in metadata.requires("schema-firewall") or []
+        if "; extra" not in r
+    }
+    assert runtime == {"numpy", "pandas", "scikit-learn"}, runtime
+
+
+def test_exactly_four_exceptions():
+    """The locked 'four exceptions' promise: the base and exactly three subclasses."""
+    from schema_firewall import LeakageError, SchemaError, SchemaFirewallError, StatelessnessError
+
+    assert set(SchemaFirewallError.__subclasses__()) == {
+        LeakageError,
+        SchemaError,
+        StatelessnessError,
+    }
+
+
+def test_core_loc_within_budget():
+    """The locked <= 500 LoC design budget, enforced so it can't silently rot.
+
+    Counts code lines the way the README documents (non-blank, non-comment)."""
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "schema_firewall"
+    code_lines = 0
+    for p in sorted(src.rglob("*.py")):
+        for line in p.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                code_lines += 1
+    assert code_lines <= 500, f"core is {code_lines} LoC, over the 500 budget"
 
 
 def test_source_is_ascii_only():

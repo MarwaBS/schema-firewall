@@ -3,16 +3,12 @@
 The README's "Verified invariants under execution" section documents that
 `examples/leakage_demo.py` produces a specific leaky R^2 and honest R^2.
 Without a test, sklearn or numpy version drift could silently move those
-numbers, leaving the README stale. This module parses the claimed values
-out of README.md itself (a hardcoded copy here once drifted: it cited a
-README line number that had moved), runs the demo as a subprocess (the
-actual user experience), and asserts the printed R^2 values stay within
-+/-0.005 of the README's claim. The README text is the single source of
-truth; this test cannot drift from it.
+numbers, leaving the README stale. This module reads the claimed values from
+README.md itself, runs the demo as a subprocess, and asserts the printed R^2
+values stay within +/-0.005 of the claim, so README and demo can't diverge.
 
-A failure here means EITHER (a) drift the README to the new numbers, OR
-(b) pin a tighter dependency floor to lock the old numbers. Both are
-explicit decisions, not silent staleness.
+A failure means EITHER drift the README to the new numbers OR pin a tighter
+dependency floor to lock the old ones -- an explicit decision, not staleness.
 """
 
 from __future__ import annotations
@@ -33,10 +29,9 @@ DRIFT_TOLERANCE = 0.005
 def _readme_claimed_r2() -> tuple[float, float]:
     """Extract the (leaky, honest) R^2 values the README claims for the demo.
 
-    Greps the README so the claim is read from where it lives, not copied
-    here -- the copy is what drifted last time. Each pattern must match
-    exactly once; zero or multiple matches mean the README wording changed
-    and this parser must be updated deliberately.
+    Reads the claim from where it lives rather than copying it here. Each
+    pattern must match exactly once; zero or multiple matches mean the README
+    wording changed and this parser must be updated deliberately.
     """
     text = README_PATH.read_text(encoding="utf-8")
     leaky = re.findall(r"R\S* = (\d+\.\d+) \(leaky\)", text)
@@ -48,7 +43,7 @@ def _readme_claimed_r2() -> tuple[float, float]:
 
 def _run_demo() -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"  # demo uses unicode box-drawing chars
+    env["PYTHONIOENCODING"] = "utf-8"  # decode demo output regardless of console codepage
     return subprocess.run(
         [sys.executable, str(DEMO_PATH)],
         capture_output=True,
@@ -59,8 +54,7 @@ def _run_demo() -> subprocess.CompletedProcess[str]:
 
 
 def _parse_r2(stdout: str, label: str) -> float:
-    # Demo prints e.g. "  leaky                R^2 = 0.9495" -- `R\S*` munches
-    # the "^2" superscript without depending on its codepoint.
+    # Demo prints "leaky   R^2 = 0.9495"; R\S* spans the "^2" without hardcoding it.
     pattern = rf"{label}\s+R\S*\s*=\s*(\d+\.\d+)"
     match = re.search(pattern, stdout)
     assert match, f"R-squared for {label!r} not found in demo output:\n{stdout}"
