@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-21
+
+Audit-driven hardening that closes five silent fail-open paths -- inputs that
+were passing, or being silently skipped, without being inspected. Several
+previously-passing inputs now raise, so this is a minor (breaking) bump.
+
+### Changed (breaking)
+- `check_leakage` inspects bool columns: a bool copy of a binary target now
+  raises `LeakageError` instead of only warning.
+- `check_leakage` realigns a target passed with a permuted (same-labels) index
+  to `X` before comparison; a target with a different label set now raises
+  `ValueError` instead of being read positionally against the wrong rows.
+- `check_leakage` raises a clear `ValueError` on a non-1-D target, an X/y length
+  mismatch, or duplicate column names (were raw numpy/pandas errors), and on a
+  0-row frame with numeric columns (was a silent clean pass).
+- `check_stateless` raises on empty `sample_indices`, an input with fewer than
+  2 rows (a 0-row frame previously passed silently), a non-`DataFrame` return,
+  and an empty full-frame output, instead of passing vacuously.
+- `check_schema` accepts any categorical column for a bare `{"c": "category"}`
+  contract (previously rejected every categorical) and raises `ValueError` on
+  duplicate columns.
+- `SchemaContract.dtypes` is stored read-only and copied, so a "frozen" contract
+  can no longer be mutated in place or aliased to the caller's dict.
+
+### Fixed
+- MI leakage detector: dense-rank binning replaces quantile binning. On a
+  zero-inflated feature (90%+ zeros) with a mixed-sign tail, quantile edges
+  collapsed onto the zero mass and a deterministic `y = x**2` leak scored
+  adjusted MI of 0.0 -- a silent miss. Dense-rank binning scores it ~0.9+ with
+  no new false positives on independent features.
+- `check_leakage` warns on numeric columns skipped for too few finite paired
+  rows, so a target copy hidden behind heavy missingness is no longer silently
+  skipped.
+- `check_stateless` copies the input per call, so an in-place pipeline can no
+  longer alias the two determinism runs (comparing a frame to itself) or mutate
+  the caller's frame.
+
+### Added
+- Tests enforcing the <= 500 LoC budget and the frozen-contract, return-None,
+  and detector-pillar promises.
+- Release workflow runs the full test suite before publishing to PyPI.
+
 ## [0.1.3] - 2026-07-06
 
 Audit-driven hardening (2026-06): fixes a crash, two incorrect/ineffective
@@ -212,6 +254,7 @@ ledger. Includes one behavioral change (see below).
 - Adversarial test suite (27 collected tests at release time).
 - MIT license.
 
+[0.2.0]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/MarwaBS/schema-firewall/compare/ef5021df74e030cf90073d77089f9839677a154a...v0.1.1

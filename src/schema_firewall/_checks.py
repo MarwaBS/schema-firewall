@@ -29,6 +29,13 @@ from ._schema import SchemaContract
 # rather than guess.
 _MIN_SAMPLES = 100
 
+# The default statelessness spot-check samples each numeric column's min/max tail
+# rows, one pipeline call per pick, so cost scales with frame width. Cap the tail
+# sampling at the 20 highest-variance columns -- where clip/winsorise/robust-scale
+# edits concentrate -- to bound cost on wide frames; callers needing exhaustive
+# coverage pass an explicit sample_indices.
+_MAX_TAIL_COLS = 20
+
 # --- Public: leakage detection ---------------------------------------
 
 
@@ -53,8 +60,9 @@ def check_leakage(
 
     The MI is sklearn's ``adjusted_mutual_info_score`` -- mutual information
     corrected for chance -- on discretised values (low-cardinality values get one
-    bin each so binary/k-class targets are not collapsed; continuous values get
-    ``sqrt(n)`` quantile bins, capped at 16). Chance correction matters: it is ~0
+    bin each so binary/k-class targets are not collapsed; higher-cardinality
+    values are dense-rank binned into ``sqrt(n)`` bins, bounded to [4, 16]).
+    Chance correction matters: it is ~0
     under independence regardless of sample size or bin count, and ~1 when one
     variable determines the other. This is what makes the MI detector catch
     non-monotone leakage without false-positiving on honest noisy predictors,
@@ -68,9 +76,18 @@ def check_leakage(
     statistically indistinguishable from a strong honest predictor at finite
     samples; do not rely on this detector for them.
 
+    Detection is per-column: a target reconstructable only from a COMBINATION of
+    columns (e.g. ``y = x1 XOR x2``) is not caught -- each column alone looks
+    independent.
+
     The target ``y`` must be numeric: all three detectors are defined on a
     continuous (or integer-encoded) target. Encode classification labels (e.g.
     ``LabelEncoder``) before calling.
+
+    Bool feature columns are inspected (True/False as 1/0). Non-numeric
+    (object/string) FEATURE columns are NOT: a stringified target copy in one is
+    reported with a warning, not a raise. Encode such columns before calling, or
+    filter that warning to an error to fail closed on them.
 
     ``mi_threshold`` is an adjusted-MI threshold in [0, 1] (default 0.2):
     deterministic dependence -- copies, k-class/binary target encodings, and
@@ -92,19 +109,29 @@ def check_leakage(
     ``mi_threshold`` if you want strong-but-honest linear features to pass.
 
     Raises:
-        ValueError: fewer than ``100`` finite paired samples (leakage detection
-            is noise-dominated below that).
+        ValueError: a malformed call -- duplicate column names, a non-1-D target,
+            an X/y length mismatch, an unalignable ``y.index``, or fewer than
+            ``100`` finite paired samples (detection is noise-dominated below that).
         LeakageError: one or more columns crossed at least one detector's
             threshold, or the target is non-numeric or constant. The message
             lists every violating column with all three metrics.
     """
-    numeric = X.select_dtypes(include=[np.number])
+    # Preconditions up front: otherwise these surface deep in the loop as a raw
+    # numpy broadcast error or IndexError that doesn't name the cause.
+    if not X.columns.is_unique:
+        dupes = X.columns[X.columns.duplicated()].unique().tolist()
+        raise ValueError(f"check_leakage: X has duplicate column names {dupes}.")
+    if np.ndim(y) != 1:
+        raise ValueError("check_leakage: y must be 1-dimensional (a Series or 1-D array).")
+    if len(y) != len(X):
+        raise ValueError(f"check_leakage: length mismatch -- X has {len(X)} rows, y has {len(y)}.")
 
-    # The detectors are defined on numeric columns only, so non-numeric columns
-    # are skipped -- but silence there is dangerous: a stringified/encoded COPY
-    # of the target sitting in an object column would pass the firewall
-    # unexamined. Warn so the caller knows those columns were NOT inspected and
-    # can encode them first if they should be.
+    # Include bool: True/False is 1/0, so a bool copy of a binary target must be
+    # inspected like any numeric copy. Only object/string columns are left out.
+    numeric = X.select_dtypes(include=[np.number, "bool"])
+
+    # Warn on uninspected non-numeric columns, so a stringified target copy hiding
+    # in one can't pass the firewall unnoticed.
     skipped = [c for c in X.columns if c not in numeric.columns]
     if skipped:
         warnings.warn(
@@ -115,8 +142,28 @@ def check_leakage(
             stacklevel=2,
         )
 
-    if numeric.empty:
+    if numeric.columns.empty:
+        # No numeric columns to inspect. Gate on the absence of columns, not on
+        # `numeric.empty` (also true for 0 rows), so a 0-row frame falls through
+        # to the min-samples precondition instead of a silent clean pass.
         return
+
+    # Realign the target to X by index before reading it positionally, or a
+    # differently-ordered y (e.g. a post-split shuffle) is compared against the
+    # wrong rows. Same labels reorder; a different label set can't align, so refuse.
+    if isinstance(y, pd.Series) and not y.index.equals(X.index):
+        same_labels = (
+            X.index.is_unique
+            and y.index.is_unique
+            and X.index.sort_values().equals(y.index.sort_values())
+        )
+        if not same_labels:
+            raise ValueError(
+                "check_leakage: y.index does not align with X.index. Pass a target "
+                "whose index matches X row-for-row (same labels), or reset both "
+                "indices, so each feature value is compared against its own target."
+            )
+        y = y.reindex(X.index)
 
     try:
         y_arr = np.asarray(y, dtype=float)
@@ -137,14 +184,17 @@ def check_leakage(
         raise LeakageError("target is constant or all-NaN; leakage check undefined")
 
     violations: list[str] = []
+    under_min: list[str] = []
     for col in numeric.columns:
         feat = numeric[col].to_numpy(dtype=float)
         # Drop rows where the feature OR the target is non-finite, so a single
         # NaN does not poison a metric. A column with too few finite paired rows
-        # can't be assessed reliably, so skip it rather than risk a noise-driven
-        # false positive.
+        # can't be assessed reliably, so skip it -- but surface the skip (below),
+        # or a target copy hiding behind heavy missingness passes unexamined.
         mask = np.isfinite(feat) & y_mask
-        if int(mask.sum()) < _MIN_SAMPLES:
+        n_finite = int(mask.sum())
+        if n_finite < _MIN_SAMPLES:
+            under_min.append(f"{col} ({n_finite} finite paired rows)")
             continue
         feat_m, y_m = feat[mask], y_arr[mask]
 
@@ -156,6 +206,14 @@ def check_leakage(
             violations.append(
                 f"{col}: pearson={pearson:.3f} spearman={spearman:.3f} mi_norm={mi_norm:.3f}"
             )
+
+    if under_min:
+        warnings.warn(
+            f"check_leakage skipped column(s) with fewer than {_MIN_SAMPLES} "
+            f"finite paired samples (estimate would be noise-dominated): "
+            f"{under_min}. These columns were NOT inspected.",
+            stacklevel=2,
+        )
 
     if violations:
         raise LeakageError("target-correlated feature(s) detected:\n  " + "\n  ".join(violations))
@@ -169,11 +227,16 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
 
     Failure modes, in order:
 
+    0. X has duplicate column names -> ValueError (malformed input).
     1. Any ``forbidden_columns`` entry is present in X -> SchemaError.
     2. Any ``required_columns`` entry is missing from X -> SchemaError.
     3. Any column listed in ``contract.dtypes`` has a mismatched
        dtype -> SchemaError.
     """
+    if not X.columns.is_unique:
+        dupes = X.columns[X.columns.duplicated()].unique().tolist()
+        raise ValueError(f"check_schema: X has duplicate column names {dupes}.")
+
     present_forbidden = sorted(set(X.columns) & set(contract.forbidden_columns))
     if present_forbidden:
         raise SchemaError(f"forbidden column(s) present in X: {present_forbidden}")
@@ -186,18 +249,27 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
         dtype_violations: list[str] = []
         for col, expected in contract.dtypes.items():
             if col not in X.columns:
-                continue  # covered by required_columns check above
+                continue  # absent columns are not dtype-checked; presence is required_columns' job
             actual_dtype = X[col].dtype
             # Compare resolved dtypes, not raw strings, so equivalent spellings
-            # match: "int", "i8", "<i8" all resolve to int64. A raw string
-            # compare rejected them against the actual "int64".
+            # ("int", "i8", "<i8") all match the actual int64.
             try:
                 expected_dtype = pd.api.types.pandas_dtype(expected)
-                matches = expected_dtype == actual_dtype
             except TypeError:
                 # `expected` is not a recognised dtype string; fall back to exact
                 # string match so a typo'd contract still fails loudly.
                 matches = str(actual_dtype) == expected
+            else:
+                if (
+                    isinstance(expected_dtype, pd.CategoricalDtype)
+                    and expected_dtype.categories is None
+                ):
+                    # Bare "category" means "any categorical": equality against a
+                    # column with specific categories is always False, so match on
+                    # the dtype kind instead of exact categories.
+                    matches = isinstance(actual_dtype, pd.CategoricalDtype)
+                else:
+                    matches = expected_dtype == actual_dtype
             if not matches:
                 dtype_violations.append(f"{col}: expected {expected!r}, got {str(actual_dtype)!r}")
         if dtype_violations:
@@ -240,16 +312,39 @@ def check_stateless(
             Must preserve the input index for state-independence
             checking.
         raw: the input frame to exercise.
-        sample_indices: which rows to spot-check for state-independence.
-            Defaults to the first row of the deterministic output.
+        sample_indices: rows to spot-check for state-independence. Default: each
+            numeric column's min/max tail rows (capped at the 20 highest-variance
+            columns), all NaN-bearing rows (capped at 10), and a fixed stride.
+            Pass an explicit list for exhaustive per-row coverage.
 
     Raises:
-        StatelessnessError: pipeline is non-deterministic or
-            state-dependent. Message identifies which invariant
-            failed.
+        StatelessnessError: pipeline is non-deterministic or state-dependent
+            (message identifies which invariant failed), or ``raw`` is too small
+            or its output empty to verify.
+        ValueError: empty ``sample_indices``, or an index not present in ``raw``.
+        TypeError: ``pipeline_fn`` returned a non-DataFrame.
     """
-    first = pipeline_fn(raw)
-    second = pipeline_fn(raw)
+    if sample_indices is not None and len(sample_indices) == 0:
+        raise ValueError(
+            "sample_indices is empty; pass at least one row to spot-check, or None "
+            "for the default row selection. An empty list checks nothing and would "
+            "pass vacuously."
+        )
+
+    if len(raw) < 2:
+        raise StatelessnessError(
+            f"raw has {len(raw)} row(s): with fewer than 2 rows a one-row subset "
+            "equals the full frame (or there is nothing to run), so a "
+            "state-dependent transform would pass vacuously. Provide at least 2 rows."
+        )
+
+    # Copy per call: an in-place pipeline that returns its input would otherwise
+    # alias first/second/raw, so the determinism check compares a frame to itself
+    # and the caller's frame is mutated.
+    first = pipeline_fn(raw.copy())
+    if not isinstance(first, pd.DataFrame):
+        raise TypeError(f"pipeline_fn must return a pandas DataFrame; got {type(first).__name__}.")
+    second = pipeline_fn(raw.copy())
 
     try:
         pd.testing.assert_frame_equal(first, second)
@@ -260,7 +355,14 @@ def check_stateless(
 
     n = len(first)
     if n == 0:
-        return
+        # raw has >= 2 rows (checked above), so an empty output means the pipeline
+        # dropped everything -- nothing left to spot-check.
+        raise StatelessnessError(
+            "pipeline_fn(raw) returned 0 rows, so the per-row spot-check has "
+            "nothing to compare and statelessness cannot be verified. If this is "
+            "a global-statistic filter, that is the state-dependence to fix; if it "
+            "is row-wise, exercise it on an input it keeps rows for."
+        )
 
     # Unique-index precondition. The spot-check selects a single row by label
     # (raw.loc[[label]]); with duplicate labels that pulls EVERY row sharing the
@@ -297,14 +399,18 @@ def check_stateless(
         #  - every row holding a NaN in any column -- global-mean/median
         #    imputation (df.fillna(df.mean())) edits exactly those, and a
         #    one-row subset can't reconstruct the global statistic;
-        #  - an even fixed-stride spread for everything else.
+        #  - an even fixed-stride spread for everything else: catch-all padding on
+        #    top of the targeted picks, bounded at ~5 extra pipeline calls.
         # A plain stride sample routinely misses tail- or NaN-only edits. (Pass
         # an explicit `sample_indices` to check more rows; checking every row is
         # the strongest, at one pipeline call per row.)
         picks: list[Hashable] = []
         kept = raw.loc[first.index]
         kept_numeric = kept.select_dtypes(include=[np.number])
-        for col in kept_numeric.columns:
+        tail_cols = kept_numeric.columns
+        if len(tail_cols) > _MAX_TAIL_COLS:
+            tail_cols = kept_numeric.var().nlargest(_MAX_TAIL_COLS).index
+        for col in tail_cols:
             s = kept_numeric[col].dropna()
             if not s.empty:
                 picks.append(s.idxmin())
@@ -338,10 +444,8 @@ def check_stateless(
             )
         single_out = pipeline_fn(raw.loc[[idx]].copy())
         if len(single_out) == 0:
-            # The full frame KEEPS this row but the one-row subset DROPS it: the
-            # keep/drop decision depends on the other rows. That is exactly the
-            # state-dependence this check exists to catch -- the old code skipped
-            # it with `continue`, a false negative on global-statistic filters.
+            # Full frame KEEPS this row but the one-row subset DROPS it: the
+            # keep/drop decision depends on the other rows -- state-dependence.
             raise StatelessnessError(
                 f"pipeline is state-dependent at index {idx!r}: the row is kept "
                 f"when the full frame is processed but dropped when that row is "
@@ -383,23 +487,20 @@ def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: Literal["pearson", "spea
 
 
 def _discretise(x: np.ndarray, n_bins: int) -> np.ndarray:
-    """Discretise a finite 1-D array into integer bin labels.
+    """Discretise a finite 1-D array into integer bin labels by dense rank.
 
-    Low-cardinality / discrete data (<= ``n_bins`` distinct values, e.g. a
-    binary or k-class target) keeps each distinct value as its own bin -- using
-    quantile edges there collapses a binary 0/1 target to a single bin and makes
-    it invisible to the MI detector. Continuous data is split into ``n_bins``
-    equal-frequency (quantile) bins.
+    Each value takes its rank among the distinct sorted values; ranks are then
+    folded into ``n_bins`` equal-width bins. Ranking by distinct value rather than
+    by observation quantile keeps a heavily repeated value (e.g. a zero-inflated
+    feature, 90%+ zeros) from collapsing every observation into one bin and hiding
+    a non-monotone leak. Low-cardinality data (<= ``n_bins`` distinct values, e.g.
+    a binary or k-class target) keeps one bin per distinct value.
     """
     uniq = np.unique(x)
-    if uniq.size < 2:
-        return np.zeros(x.shape, dtype=np.int64)
+    ranks = np.searchsorted(uniq, x)
     if uniq.size <= n_bins:
-        # Discrete / low-cardinality: one bin per distinct value.
-        return np.searchsorted(uniq, x).astype(np.int64)
-    edges = np.unique(np.quantile(x, np.linspace(0.0, 1.0, n_bins + 1)))
-    # Interior edges only; np.digitize then maps values to bin indices.
-    return np.digitize(x, edges[1:-1]).astype(np.int64)
+        return ranks.astype(np.int64)
+    return ((ranks * n_bins) // uniq.size).astype(np.int64)
 
 
 def _normalised_mi(feat: np.ndarray, y: np.ndarray) -> float:
@@ -416,9 +517,9 @@ def _normalised_mi(feat: np.ndarray, y: np.ndarray) -> float:
     clamp at 0. This is what makes the MI detector catch non-monotone leakage
     that Pearson/Spearman miss, without false-positiving on noise.
 
-    The bin count scales with sample size (sqrt rule, capped at 16): too many
-    bins on few samples gives ~1 sample/bin and unstable estimates, so smaller
-    frames use coarser bins to keep the estimate stable.
+    The bin count is ``sqrt(n)`` bounded to [4, 16]: too many bins on few samples
+    give ~1 sample/bin (unstable), too few flatten a non-monotone fold like
+    ``y = x**2`` into apparent independence.
     """
     n = int(feat.shape[0])
     n_bins = min(16, max(4, round(n**0.5)))
