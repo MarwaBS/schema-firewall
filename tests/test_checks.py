@@ -8,6 +8,7 @@ does not raise. Parameterised where failure has multiple shapes.
 from __future__ import annotations
 
 import re
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -317,25 +318,25 @@ def test_stateless_propagates_pipeline_exceptions(clean_frame):
         check_stateless(broken, x)
 
 
-def test_stateless_default_spot_check_cost_is_bounded_in_width(clean_frame):
-    """The default spot-check caps tail sampling at the highest-variance columns,
-    so cost stays bounded on a wide frame instead of scaling with column count."""
-    x, _ = clean_frame
-    x = x.copy()
-    rng = np.random.default_rng(0)
-    for i in range(60):  # 63 numeric columns, each with distinct min/max rows
-        x[f"c{i}"] = rng.permutation(len(x)).astype(float)
+def test_stateless_catches_tail_edit_on_low_variance_wide_frame():
+    """A cross-row edit on a low-variance column must be caught even on a wide
+    frame: variance ranking is scale-dependent, so a standardised column
+    (variance ~1) must not be skipped in favour of higher-variance ones."""
+    for seed in range(20):
+        rng = np.random.default_rng(seed)
+        n = 400
+        data = {f"c{i}": rng.normal(0, 10, n) for i in range(25)}
+        data["victim"] = rng.normal(0, 1, n)  # lowest variance of the 26 columns
+        raw = pd.DataFrame(data)
 
-    calls = {"n": 0}
+        def clip_victim(df):
+            out = df.copy()
+            hi = out["victim"].quantile(0.995)  # cross-row statistic -> stateful
+            out["victim"] = out["victim"].clip(upper=hi)
+            return out
 
-    def counting_pipeline(df):
-        calls["n"] += 1
-        out = df.copy()
-        out["z"] = out["sqft"] * 2
-        return out[["z"]]
-
-    check_stateless(counting_pipeline, x)
-    assert calls["n"] < 80, f"spot-check made {calls['n']} pipeline calls on 63 cols"
+        with pytest.raises(StatelessnessError):
+            check_stateless(clip_victim, raw)
 
 
 def test_stateless_refuses_empty_output_from_nonempty_input(clean_frame):
@@ -488,7 +489,8 @@ def test_leakage_passes_legitimate_noisy_predictor():
     """A genuinely predictive but noisy feature (real signal + real noise, not a
     deterministic encoding of the target) must NOT be flagged -- adjusted MI
     measures shared information, so noise keeps an honest predictor well below
-    threshold. Guards against false positives on real features."""
+    threshold. Without it, the firewall would flag honest, noisy predictors
+    (r~0.45 here) and decay from a leak detector into a feature selector."""
     rng = np.random.default_rng(1)
     n = 300
     y = rng.lognormal(13, 0.5, n)
@@ -685,7 +687,7 @@ def test_leakage_false_positive_operating_point_is_pinned():
             y = rng.standard_normal(n)
             x = r * y + np.sqrt(max(0.0, 1.0 - r * r)) * rng.standard_normal(n)
             try:
-                check_leakage(pd.DataFrame({"feat": x}), y)
+                check_leakage(pd.DataFrame({"feat": x}), pd.Series(y))
             except LeakageError:
                 hits += 1
         return hits / seeds
@@ -695,8 +697,35 @@ def test_leakage_false_positive_operating_point_is_pinned():
     assert flag_rate(0.75) == 0.0
     # A near-deterministic predictor is always flagged (the detector's job).
     assert flag_rate(0.95) == 1.0
-    # Documented transition: majority-flagged by |r|=0.85 (measured ~0.75).
+    # Documented transition: a nonzero minority by |r|=0.83 (measured ~0.15),
+    # the majority by |r|=0.85 (measured ~0.75). Pins both operating points.
+    assert 0.0 < flag_rate(0.83) < 0.5
     assert flag_rate(0.85) >= 0.5
+
+
+def test_leakage_passes_nullable_integer_with_na():
+    """A pandas nullable-integer (Int64) feature/target carrying pd.NA is inspected
+    as numeric, not skipped with a warning, and its NAs are dropped pairwise. An
+    independent pair passes cleanly across the pandas>=2.0,<3.0 range."""
+    rng = np.random.default_rng(0)
+    n = 300
+    feat = pd.array(rng.integers(0, 100, n), dtype="Int64")
+    feat[0] = pd.NA
+    tgt = pd.array(rng.integers(0, 100, n), dtype="Int64")
+    tgt[1] = pd.NA
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        check_leakage(pd.DataFrame({"feat": feat}), pd.Series(tgt))
+
+
+def test_leakage_catches_nullable_boolean_target_copy():
+    """A nullable-boolean (BooleanDtype) target copied into a feature is caught:
+    the extension dtype is inspected like a plain bool, so the copy trips the
+    correlation cap rather than slipping through as a non-numeric column."""
+    rng = np.random.default_rng(0)
+    b = pd.array(rng.integers(0, 2, 300).astype(bool), dtype="boolean")
+    with pytest.raises(LeakageError, match="target_copy"):
+        check_leakage(pd.DataFrame({"target_copy": b}), pd.Series(b))
 
 
 def test_leakage_warns_on_columns_skipped_for_high_missingness(clean_frame):
