@@ -87,8 +87,8 @@ Out-of-scope without prior issue discussion:
   (no upstream stubs).
 - Line length: 100 characters (also from `pyproject.toml`).
 - ASCII source. Non-ASCII characters in docstrings and comments
-  caused cp1252 console crashes on Windows in 0.1.1, so the 0.1.x
-  series keeps every `.py` under `src/` and `tests/` ASCII-only.
+  caused cp1252 console crashes on Windows in 0.1.1, so every `.py`
+  under `src/` and `tests/` is kept ASCII-only.
   This is **enforced**, not just requested: `test_source_is_ascii_only`
   fails the build on any non-ASCII byte. Use `->` for arrows,
   `rho` / `union` for Greek letters, `--` for em-dashes.
