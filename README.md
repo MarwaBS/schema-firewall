@@ -11,7 +11,7 @@ pip install schema-firewall
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **Production usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.3` in `requirements.txt` and re-validates the integration in its `External Benchmark` CI job, which runs weekly and on pushes/PRs touching the benchmark's paths (path-filtered, not every push). It shows the library is used and CI-exercised downstream — not that every contract is enforced there.
+> **Production usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.3` in `requirements.txt` and re-validates the integration in its `External Benchmark` CI job, which runs weekly and on pushes/PRs touching the benchmark's paths (path-filtered, not every push). It shows the library is used and CI-exercised downstream — not that every contract is enforced there. The pin trails this README by a minor version (0.1.3 predates the 0.2.x breaking hardening documented below); bumping it is a separate flagship decision.
 
 ---
 
@@ -92,7 +92,7 @@ The library is in production use today as a pinned dep of [`nyc-real-estate-pred
 
 - **Statistical leakage detection triggers on the bundled California housing demo.** Build a target-mean-encoded feature on rounded lat/lon buckets — Ridge regression returns R² = 0.9495 (leaky). Apply the same target encoding per train fold only — R² collapses to 0.4384 (honest). Both `check_leakage` and `check_stateless` raise on the leaky pipeline. Reproducible in 60 seconds via [`examples/leakage_demo.ipynb`](examples/leakage_demo.ipynb).
 
-- **Statelessness holds under subset perturbation.** `check_stateless` runs the user pipeline on the full frame, then on a one-row subset. Any transform whose per-row output depends on other rows (frequency encoders, target-mean encoders, ComBat-style global normalisation) fails this invariant by construction. The default spot-check deliberately targets the rows a global transform is most likely to edit — the min/max rows of up to the 20 highest-variance numeric columns (winsorise/clip/quantile filters touch the tails; the cap keeps cost bounded on wide frames), NaN-bearing rows (the first 10 by default — `fillna(df.mean())` edits every NaN row identically, so a capped sample still catches it), and a fixed-stride spread across the rest — rather than being fooled by a plain stride sample that misses a tail- or NaN-only edit. Pass an explicit `sample_indices` to check more rows; checking every row is the strongest guarantee.
+- **Statelessness holds under subset perturbation.** `check_stateless` runs the user pipeline on the full frame, then on a one-row subset. Any transform whose per-row output depends on other rows (frequency encoders, target-mean encoders, ComBat-style global normalisation) fails this invariant by construction. The default spot-check deliberately targets the rows a global transform is most likely to edit — the min/max rows of every numeric column (winsorise/clip/quantile filters touch the tails, and a low-variance standardised column is as likely a target as a high-variance one, so no column is skipped), NaN-bearing rows (the first 10 by default — `fillna(df.mean())` edits every NaN row identically, so a capped sample still catches it), and a fixed-stride spread across the rest — rather than being fooled by a plain stride sample that misses a tail- or NaN-only edit. Cost is two pipeline calls per numeric column; pass an explicit `sample_indices` to bound it on very wide frames or to check every row (the strongest guarantee).
 
 - **Forbidden-column gate raises on the documented set.** `nyc-real-estate-predictor` configures `SchemaContract(forbidden_columns=frozenset({"SALE PRICE", "SALE DATE", "PRICE_PER_SQFT", "TARGET", "log_price"}))`. Verifiable from this repo: the parametrized `tests/test_checks.py::test_schema_rejects_forbidden_column` asserts `check_schema` raises on each of those names. The flagship additionally re-validates the integration in its own CI (see the production-usage note above); its internal test suite is that repo's claim, not verified here.
 
@@ -120,7 +120,7 @@ Three checks. One contract class. Four exceptions. That's the whole library.
 - **An adversarial test for every documented failure mode** (and a regression test for each fixed bug).
 - **Three dependencies:** `numpy`, `pandas`, `scikit-learn`. Nothing else.
 
-If `schema-firewall` v0.1 is missing a check you need, the library is wrong for your use case. Build the check in-line. v0.1 will not grow to absorb it.
+If `schema-firewall` is missing a check you need, the library is wrong for your use case. Build the check in-line. Its surface will not grow to absorb it.
 
 ---
 

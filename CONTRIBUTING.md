@@ -17,11 +17,12 @@ Expected: the full suite passes in under 20 seconds. (No fixed count here on
 purpose — it drifts every time a test is added; `pytest` reports the current
 number.)
 
-To also run static analysis:
+To also run static analysis (the same commands CI runs):
 
 ```bash
-mypy src/
-ruff check src/
+ruff check .
+ruff format --check .
+mypy src tests
 ```
 
 Both should be green on `main`. If they aren't on a fresh checkout,
@@ -53,12 +54,12 @@ The README states the lock explicitly:
 
 Pull requests that add to the public API surface — a fourth `check_*`
 function, a second contract dataclass, a fifth exception type — will
-be rejected on principle, not on quality. v0.1.x is locked at this
-shape so users can audit the entire surface in 5 minutes.
+be rejected on principle, not on quality. The public surface is locked at
+this shape so users can audit the entire surface in 5 minutes.
 
 If you find a real bug class the existing three checks can't catch,
-open an issue first to discuss whether it warrants a v0.2.0 surface
-expansion or whether it fits inside the existing three.
+open an issue first to discuss whether it warrants expanding the locked
+surface or whether it fits inside the existing three.
 
 In-scope PRs:
 
@@ -79,14 +80,15 @@ Out-of-scope without prior issue discussion:
 
 ## Code style
 
-- `ruff check src/` must be green. Conservative rule set (E, F, W, I)
-  is already configured in `pyproject.toml`.
-- `mypy src/` must be green. Non-strict mode with overrides for
-  pandas and scikit-learn (no upstream stubs).
+- `ruff check .` and `ruff format --check .` must be green. Conservative
+  rule set (E, F, W, I) is already configured in `pyproject.toml`.
+- `mypy src tests` must be green. Non-strict mode; `pandas-stubs` (a dev
+  dependency) supplies pandas types, and scikit-learn imports are ignored
+  (no upstream stubs).
 - Line length: 100 characters (also from `pyproject.toml`).
 - ASCII source. Non-ASCII characters in docstrings and comments
-  caused cp1252 console crashes on Windows in 0.1.1, so the 0.1.x
-  series keeps every `.py` under `src/` and `tests/` ASCII-only.
+  caused cp1252 console crashes on Windows in 0.1.1, so every `.py`
+  under `src/` and `tests/` is kept ASCII-only.
   This is **enforced**, not just requested: `test_source_is_ascii_only`
   fails the build on any non-ASCII byte. Use `->` for arrows,
   `rho` / `union` for Greek letters, `--` for em-dashes.

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - Unreleased
+
+### Fixed
+- `check_stateless` default spot-check samples every numeric column's min/max
+  tail rows again. 0.2.0 silently narrowed the tail sampling to the 20
+  highest-variance columns on frames wider than that -- an undocumented change
+  that re-opened the tail fail-open the 0.1.3 entry reports closed. A cross-row
+  edit on a low-variance column (e.g. a standardised or robust-scaled column,
+  variance ~1) was evicted from the sample and missed on ~18 of 20 seeds on a
+  26-column frame. Variance ranking is scale-dependent, so the columns those
+  transforms produce are exactly the ones the cap dropped. Cost is now two
+  pipeline calls per numeric column; pass `sample_indices` to bound it on very
+  wide frames. Regression test:
+  `test_stateless_catches_tail_edit_on_low_variance_wide_frame`.
+
 ## [0.2.0] - 2026-07-21
 
 Audit-driven hardening that closes five silent fail-open paths -- inputs that
@@ -254,6 +269,7 @@ ledger. Includes one behavioral change (see below).
 - Adversarial test suite (27 collected tests at release time).
 - MIT license.
 
+[0.2.1]: https://github.com/MarwaBS/schema-firewall/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.1...v0.1.2
