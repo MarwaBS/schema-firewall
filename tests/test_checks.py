@@ -317,25 +317,26 @@ def test_stateless_propagates_pipeline_exceptions(clean_frame):
         check_stateless(broken, x)
 
 
-def test_stateless_default_spot_check_cost_is_bounded_in_width(clean_frame):
-    """The default spot-check caps tail sampling at the highest-variance columns,
-    so cost stays bounded on a wide frame instead of scaling with column count."""
-    x, _ = clean_frame
-    x = x.copy()
-    rng = np.random.default_rng(0)
-    for i in range(60):  # 63 numeric columns, each with distinct min/max rows
-        x[f"c{i}"] = rng.permutation(len(x)).astype(float)
+def test_stateless_catches_tail_edit_on_low_variance_wide_frame():
+    """A cross-row edit on a low-variance column must be caught even on a wide
+    frame. Variance ranking is scale-dependent, so a standardised/robust-scaled
+    column (variance ~1) is exactly the one a variance cap would evict -- the
+    spot-check must cover every numeric column's tails, not a top-k slice."""
+    for seed in range(20):
+        rng = np.random.default_rng(seed)
+        n = 400
+        data = {f"c{i}": rng.normal(0, 10, n) for i in range(25)}
+        data["victim"] = rng.normal(0, 1, n)  # lowest variance of the 26 columns
+        raw = pd.DataFrame(data)
 
-    calls = {"n": 0}
+        def clip_victim(df):
+            out = df.copy()
+            hi = out["victim"].quantile(0.995)  # cross-row statistic -> stateful
+            out["victim"] = out["victim"].clip(upper=hi)
+            return out
 
-    def counting_pipeline(df):
-        calls["n"] += 1
-        out = df.copy()
-        out["z"] = out["sqft"] * 2
-        return out[["z"]]
-
-    check_stateless(counting_pipeline, x)
-    assert calls["n"] < 80, f"spot-check made {calls['n']} pipeline calls on 63 cols"
+        with pytest.raises(StatelessnessError):
+            check_stateless(clip_victim, raw)
 
 
 def test_stateless_refuses_empty_output_from_nonempty_input(clean_frame):
@@ -488,7 +489,8 @@ def test_leakage_passes_legitimate_noisy_predictor():
     """A genuinely predictive but noisy feature (real signal + real noise, not a
     deterministic encoding of the target) must NOT be flagged -- adjusted MI
     measures shared information, so noise keeps an honest predictor well below
-    threshold. Guards against false positives on real features."""
+    threshold. Without it, the firewall would flag honest, noisy predictors
+    (r~0.45 here) and decay from a leak detector into a feature selector."""
     rng = np.random.default_rng(1)
     n = 300
     y = rng.lognormal(13, 0.5, n)

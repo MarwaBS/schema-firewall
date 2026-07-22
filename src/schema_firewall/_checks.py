@@ -29,13 +29,6 @@ from ._schema import SchemaContract
 # rather than guess.
 _MIN_SAMPLES = 100
 
-# The default statelessness spot-check samples each numeric column's min/max tail
-# rows, one pipeline call per pick, so cost scales with frame width. Cap the tail
-# sampling at the 20 highest-variance columns -- where clip/winsorise/robust-scale
-# edits concentrate -- to bound cost on wide frames; callers needing exhaustive
-# coverage pass an explicit sample_indices.
-_MAX_TAIL_COLS = 20
-
 # --- Public: leakage detection ---------------------------------------
 
 
@@ -292,7 +285,7 @@ def check_stateless(
     1. **Determinism.** ``pipeline_fn(raw)`` produces identical output
        when called twice on the same input.
     2. **Row-wise statelessness.** For each row in ``sample_indices``
-       (default: first kept row), ``pipeline_fn`` applied to a
+       (default: see below), ``pipeline_fn`` applied to a
        one-row subset must produce the same output for that row as
        ``pipeline_fn(raw)`` did. This is a strictly harder constraint
        than shuffling -- mean-encoders, rank transforms, and
@@ -312,10 +305,11 @@ def check_stateless(
             Must preserve the input index for state-independence
             checking.
         raw: the input frame to exercise.
-        sample_indices: rows to spot-check for state-independence. Default: each
-            numeric column's min/max tail rows (capped at the 20 highest-variance
-            columns), all NaN-bearing rows (capped at 10), and a fixed stride.
-            Pass an explicit list for exhaustive per-row coverage.
+        sample_indices: rows to spot-check for state-independence. Default: every
+            numeric column's min/max tail rows, all NaN-bearing rows (capped at
+            10), and a fixed stride -- so a tail edit on any column is covered
+            regardless of that column's scale. Cost is two pipeline calls per
+            numeric column; pass an explicit list to bound it on very wide frames.
 
     Raises:
         StatelessnessError: pipeline is non-deterministic or state-dependent
@@ -407,10 +401,7 @@ def check_stateless(
         picks: list[Hashable] = []
         kept = raw.loc[first.index]
         kept_numeric = kept.select_dtypes(include=[np.number])
-        tail_cols = kept_numeric.columns
-        if len(tail_cols) > _MAX_TAIL_COLS:
-            tail_cols = kept_numeric.var().nlargest(_MAX_TAIL_COLS).index
-        for col in tail_cols:
+        for col in kept_numeric.columns:
             s = kept_numeric[col].dropna()
             if not s.empty:
                 picks.append(s.idxmin())
