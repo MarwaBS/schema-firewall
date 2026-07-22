@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-07-21
 
-Audit-driven hardening that closes five silent fail-open paths -- inputs that
+Hardening release that closes five silent fail-open paths -- inputs that
 were passing, or being silently skipped, without being inspected. Several
 previously-passing inputs now raise, so this is a minor (breaking) bump.
 
@@ -64,7 +64,7 @@ previously-passing inputs now raise, so this is a minor (breaking) bump.
 
 ## [0.1.3] - 2026-07-06
 
-Audit-driven hardening (2026-06): fixes a crash, two incorrect/ineffective
+Hardening release: fixes a crash, two incorrect/ineffective
 checks, and several error-handling and tooling gaps. Each fix carries a
 regression test.
 
@@ -152,15 +152,15 @@ regression test.
 
 ## [0.1.2] - 2026-05-28
 
-Patch release closing 11 audit findings deferred from the 2026-05-23
-ledger. Includes one behavioral change (see below).
+Patch release closing 11 findings deferred from an internal review.
+Includes one behavioral change (see below).
 
 ### Added
 - Regression test pinning `check_leakage` behavior on low-cardinality
   classification targets (3-class balanced y, N=200). Asserts the
   function passes on independent features and raises `LeakageError`
   on a target-copy feature. Closes the bug class that motivated
-  retracted Finding #1 in the audit. (#5)
+  a finding retracted during internal review. (#5)
 - Regression test asserting `check_stateless` raises `ValueError` when
   a `sample_indices` entry is not in `raw.index`. (#9)
 - `CONTRIBUTING.md` at repo root: test-suite invocation, demo
