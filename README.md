@@ -11,7 +11,7 @@ pip install schema-firewall
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **Production usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.3` in `requirements.txt` and re-validates the integration in its `External Benchmark` CI job, which runs weekly and on pushes/PRs touching the benchmark's paths (path-filtered, not every push). It shows the library is used and CI-exercised downstream — not that every contract is enforced there.
+> **Production usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.3` in `requirements.txt` and re-validates the integration in its `External Benchmark` CI job, which runs weekly and on pushes/PRs touching the benchmark's paths (path-filtered, not every push). It shows the library is used and CI-exercised downstream — not that every contract is enforced there. The pin trails this README by a minor version (0.1.3 predates the 0.2.x breaking hardening documented below); bumping it is a separate flagship decision.
 
 ---
 
@@ -120,7 +120,7 @@ Three checks. One contract class. Four exceptions. That's the whole library.
 - **An adversarial test for every documented failure mode** (and a regression test for each fixed bug).
 - **Three dependencies:** `numpy`, `pandas`, `scikit-learn`. Nothing else.
 
-If `schema-firewall` v0.1 is missing a check you need, the library is wrong for your use case. Build the check in-line. v0.1 will not grow to absorb it.
+If `schema-firewall` is missing a check you need, the library is wrong for your use case. Build the check in-line. Its surface will not grow to absorb it.
 
 ---
 

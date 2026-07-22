@@ -99,7 +99,10 @@ def check_leakage(
     detector (flagging by ``|r| ~ 0.85``) therefore binds well before the Pearson
     / Spearman cap (``max_abs_corr = 0.95``) ever would -- i.e. the practical
     leakage threshold for a linear predictor is ``|r| ~ 0.85``, not 0.95. Raise
-    ``mi_threshold`` if you want strong-but-honest linear features to pass.
+    ``mi_threshold`` if you want strong-but-honest linear features to pass. The
+    Pearson/Spearman caps are kept even though MI usually binds first: they are
+    near-free, they name which pillar tripped in the error message, and they
+    remain a backstop if a future bin-count change lifts the MI band above 0.95.
 
     Raises:
         ValueError: a malformed call -- duplicate column names, a non-1-D target,
