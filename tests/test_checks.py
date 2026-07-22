@@ -560,7 +560,7 @@ def test_stateless_catches_global_mean_imputation():
     """Global-mean imputation `df.fillna(df.mean())` is the canonical leakage
     bug (fit on full data). The NaN row processed alone can't reconstruct the
     global mean, so it diverges from the full-frame output -- caught because the
-    default spot-check now includes NaN-bearing rows, even when the NaN sits off
+    default spot-check includes NaN-bearing rows, even when the NaN sits off
     the min/max/stride sample."""
     rng = np.random.default_rng(0)
     x = rng.uniform(0, 100, 200)

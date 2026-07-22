@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wide frames. Regression test:
   `test_stateless_catches_tail_edit_on_low_variance_wide_frame`.
 
+### Documentation
+- Corrected the `check_leakage` false-positive band: the measured flag rate
+  at `|r| = 0.80` is at most 5% (1 of 20 seeds), not "~0". The
+  operating-point test now pins the 0.80 boundary alongside 0.75/0.83/0.85.
+
 ## [0.2.0] - 2026-07-21
 
 Hardening release that closes five silent fail-open paths -- inputs that
