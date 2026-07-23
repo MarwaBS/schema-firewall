@@ -95,8 +95,10 @@ Out-of-scope without prior issue discussion:
 
 ## Release process (maintainers only)
 
-The full release flow is documented in `CHANGELOG.md` entries and
-recorded in the audit ledger. Versions are single-sourced from
+The release flow: date the `CHANGELOG.md` entry, bump the version in
+`pyproject.toml`, then push a matching `vX.Y.Z` tag. The release
+workflow refuses to publish unless the full test suite passes and the
+tag matches the pyproject version. Versions are single-sourced from
 `pyproject.toml`; bumping the patch version is a one-file edit
 because `__init__.py` reads from package metadata via
 `importlib.metadata`.

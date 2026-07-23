@@ -88,9 +88,10 @@ def check_leakage(
     correlated columns land near 0, but the detector scores raw target
     dependence, not its *source*: a genuinely strong honest predictor crosses
     the threshold too. Measured (honest linear feature, 20 seeds, n=400): flags
-    ~0 up to ``|r| <= 0.80``, a minority (~15%) by ``|r| = 0.83``, and the
-    majority (~75%) by ``|r| = 0.85``. That is deliberate -- a leakage firewall
-    should surface any feature that nearly determines the target -- so read a
+    0 up to ``|r| <= 0.75``, at most 5% at ``|r| = 0.80``, a minority (~15%) by
+    ``|r| = 0.83``, and the majority (~75%) by ``|r| = 0.85``. That is
+    deliberate -- a leakage firewall should surface any feature that nearly
+    determines the target -- so read a
     flag as "audit this column", not "proven leak". At least ``100`` rows are
     required; bins scale with sample size to keep the estimate stable.
 
@@ -225,6 +226,8 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
 
     0. X has duplicate column names -> ValueError (malformed input).
     1. Any ``forbidden_columns`` entry is present in X -> SchemaError.
+       Name matching is exact and case-sensitive: ``"sale price"`` does
+       not match a ``"SALE PRICE"`` contract entry.
     2. Any ``required_columns`` entry is missing from X -> SchemaError.
     3. Any column listed in ``contract.dtypes`` has a mismatched
        dtype -> SchemaError.

@@ -375,8 +375,8 @@ def test_stateless_clear_error_on_non_dataframe_return(clean_frame):
 
 
 def test_stateless_raises_on_empty_sample_indices(clean_frame):
-    """An empty sample_indices list skipped the default row selection and ran zero
-    spot-checks -- a vacuous pass. It is now a caller error."""
+    """An empty sample_indices list skips the default row selection and would run
+    zero spot-checks -- a vacuous pass -- so it is a caller error."""
     x, _ = clean_frame
     with pytest.raises(ValueError, match="empty"):
         check_stateless(_row_wise_pipeline, x, sample_indices=[])
@@ -421,7 +421,7 @@ def test_public_api_shape():
 
 
 # -------------------------------------------------------------------
-# 5. Audit regressions (2026-06)
+# 5. Regression tests
 # -------------------------------------------------------------------
 
 
@@ -439,7 +439,7 @@ def test_leakage_single_nan_does_not_crash(clean_frame):
 
 def test_leakage_mi_norm_is_bounded_in_unit_interval(clean_frame):
     """The 'mi_norm in [0, 1]' claim must hold: a perfect copy normalises to
-    1.0, not >1 (the old histogram-entropy denominator gave ~1.33)."""
+    1.0, not >1 (a histogram-entropy denominator puts it at ~1.33)."""
     x, y = clean_frame
     x = x.copy()
     x["copy"] = y.to_numpy()
@@ -512,7 +512,7 @@ def test_leakage_small_sample_raises_clear_precondition():
 def test_stateless_rejects_duplicate_index():
     """A non-unique index makes the per-row spot-check vacuous (raw.loc[[label]]
     pulls every row sharing the label), so a global transform would pass. The
-    check now refuses a duplicate index instead of giving a false pass."""
+    check refuses a duplicate index instead of giving a false pass."""
     rng = np.random.default_rng(0)
     df = pd.DataFrame({"sqft": rng.uniform(500, 3000, 200)}, index=[7] * 200)
 
@@ -540,8 +540,8 @@ def test_stateless_catches_global_statistic_row_filter(clean_frame):
 
 
 def test_stateless_catches_global_winsorizer(clean_frame):
-    """A global-quantile clip (winsorise) only edits TAIL rows, so the old
-    fixed-stride spot-checks missed it ~79% of the time. Spot-checking each
+    """A global-quantile clip (winsorise) only edits TAIL rows, which
+    fixed-stride spot-checks miss ~79% of the time. Spot-checking each
     numeric column's extreme rows catches it deterministically (the modified
     row, processed alone, has itself as its own quantile and is left unclipped,
     diverging from the full-frame output)."""
@@ -560,7 +560,7 @@ def test_stateless_catches_global_mean_imputation():
     """Global-mean imputation `df.fillna(df.mean())` is the canonical leakage
     bug (fit on full data). The NaN row processed alone can't reconstruct the
     global mean, so it diverges from the full-frame output -- caught because the
-    default spot-check now includes NaN-bearing rows, even when the NaN sits off
+    default spot-check includes NaN-bearing rows, even when the NaN sits off
     the min/max/stride sample."""
     rng = np.random.default_rng(0)
     x = rng.uniform(0, 100, 200)
@@ -695,6 +695,8 @@ def test_leakage_false_positive_operating_point_is_pinned():
     # 0-FP floor: independent + weak honest predictors are never flagged.
     assert flag_rate(0.0) == 0.0
     assert flag_rate(0.75) == 0.0
+    # Docstring's edge claim "at most 5% at |r| = 0.80" (measured 0.05).
+    assert flag_rate(0.80) <= 0.05
     # A near-deterministic predictor is always flagged (the detector's job).
     assert flag_rate(0.95) == 1.0
     # Documented transition: a nonzero minority by |r|=0.83 (measured ~0.15),
