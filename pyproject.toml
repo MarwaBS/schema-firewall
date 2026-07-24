@@ -40,7 +40,7 @@ dev = [
     "twine>=5.0",
     "mypy>=1.11",
     "pandas-stubs",
-    "ruff>=0.6",
+    "ruff>=0.6,<0.16",  # bounded: 0.16 reformats README code fences, so the format gate must pin a known line
 ]
 
 [project.urls]
