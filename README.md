@@ -134,7 +134,7 @@ If `schema-firewall` is missing a check you need, the library is wrong for your 
 
 ---
 
-## What it caught in downstream usage (dogfood)
+## What it caught in downstream usage
 
 The `schema-firewall` checks are the same ones used by the [NYC Real Estate Predictor external benchmark](https://github.com/MarwaBS/nyc-real-estate-predictor) against NYC.gov 2024 Rolling Sales data. The flagship benchmark uses `schema-firewall` as a dependency, not a vendored copy. When the library breaks, the benchmark breaks. This is by design.
 
