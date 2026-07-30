@@ -11,7 +11,7 @@ pip install schema-firewall
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **Production usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.3` in `requirements.txt` and re-validates the integration in its `External Benchmark` CI job, which runs weekly and on pushes/PRs touching the benchmark's paths (path-filtered, not every push). It shows the library is used and CI-exercised downstream — not that every contract is enforced there. The pin is deliberate, not deferred. `0.1.3` predates the `0.2.0` variance-cap tail-sampling regression entirely — it samples every numeric column exhaustively — so the flagship was never exposed to that fail-open; and the flagship calls only `check_leakage` and `check_schema`, never `check_stateless`, so the affected surface is unreachable downstream regardless. `0.2.x` also switched the leakage-MI binning from quantile to dense-rank, which shifts the MI scale, so moving the pin would require re-measuring the flagship's `mi_threshold` (calibrated against `0.1.3`'s MI) — a measured change, not a version bump.
+> **Downstream usage (dogfood).** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.3` in `requirements.txt` and re-validates the integration in its `External Benchmark` CI job, which runs weekly and on pushes/PRs touching the benchmark's paths (path-filtered, not every push). It shows the library is used and CI-exercised downstream — not that every contract is enforced there. The pin is deliberate, not deferred. `0.1.3` predates the `0.2.0` variance-cap tail-sampling regression entirely — it samples every numeric column exhaustively — so the flagship was never exposed to that fail-open; and the flagship calls only `check_leakage` and `check_schema`, never `check_stateless`, so the affected surface is unreachable downstream regardless. `0.2.x` also switched the leakage-MI binning from quantile to dense-rank, which shifts the MI scale, so moving the pin would require re-measuring the flagship's `mi_threshold` (calibrated against `0.1.3`'s MI) — a measured change, not a version bump.
 
 ---
 
@@ -88,13 +88,13 @@ If you've ever applied `.mean()`, `.value_counts()`, `TargetEncoder`, or ComBat/
 
 ## Verified invariants under execution
 
-The library is in production use today as a pinned dep of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor). The flagship's `External Benchmark` CI job re-checks these invariants against the published wheel on a weekly schedule and on pushes/PRs touching the benchmark's paths (the job is path-filtered):
+The library is consumed in downstream CI today as a pinned dep of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor). The flagship's `External Benchmark` CI job re-checks these invariants against the published wheel on a weekly schedule and on pushes/PRs touching the benchmark's paths (the job is path-filtered):
 
 - **Statistical leakage detection triggers on the bundled California housing demo.** Build a target-mean-encoded feature on rounded lat/lon buckets — Ridge regression returns R² = 0.9495 (leaky). Apply the same target encoding per train fold only — R² collapses to 0.4384 (honest). Both `check_leakage` and `check_stateless` raise on the leaky pipeline. Reproducible in 60 seconds via [`examples/leakage_demo.ipynb`](examples/leakage_demo.ipynb).
 
 - **Statelessness holds under subset perturbation.** `check_stateless` runs the user pipeline on the full frame, then on a one-row subset. Any transform whose per-row output depends on other rows (frequency encoders, target-mean encoders, ComBat-style global normalisation) fails this invariant by construction. The default spot-check deliberately targets the rows a global transform is most likely to edit — the min/max rows of every numeric column (winsorise/clip/quantile filters touch the tails, and a low-variance standardised column is as likely a target as a high-variance one, so no column is skipped), NaN-bearing rows (the first 10 by default — `fillna(df.mean())` edits every NaN row identically, so a capped sample still catches it), and a fixed-stride spread across the rest — rather than being fooled by a plain stride sample that misses a tail- or NaN-only edit. Cost is two pipeline calls per numeric column; pass an explicit `sample_indices` to bound it on very wide frames or to check every row (the strongest guarantee).
 
-- **Forbidden-column gate raises on the documented set.** `nyc-real-estate-predictor` configures `SchemaContract(forbidden_columns=frozenset({"SALE PRICE", "SALE DATE", "PRICE_PER_SQFT", "TARGET", "log_price"}))`. Verifiable from this repo: the parametrized `tests/test_checks.py::test_schema_rejects_forbidden_column` asserts `check_schema` raises on each of those names. The flagship additionally re-validates the integration in its own CI (see the production-usage note above); its internal test suite is that repo's claim, not verified here.
+- **Forbidden-column gate raises on the documented set.** `nyc-real-estate-predictor` configures `SchemaContract(forbidden_columns=frozenset({"SALE PRICE", "SALE DATE", "PRICE_PER_SQFT", "TARGET", "log_price"}))`. Verifiable from this repo: the parametrized `tests/test_checks.py::test_schema_rejects_forbidden_column` asserts `check_schema` raises on each of those names. The flagship additionally re-validates the integration in its own CI (see the downstream-usage note above); its internal test suite is that repo's claim, not verified here.
 
 - **Determinism check catches non-deterministic transforms.** Two consecutive `pipeline_fn(raw)` calls must produce identical frames. Unseeded random initialisation, dict-order dependency, and side-effecting transforms all fail. Internal `pd.testing.assert_frame_equal`.
 
@@ -134,7 +134,7 @@ If `schema-firewall` is missing a check you need, the library is wrong for your 
 
 ---
 
-## What it caught in production (dogfood)
+## What it caught in downstream usage (dogfood)
 
 The `schema-firewall` checks are the same ones used by the [NYC Real Estate Predictor external benchmark](https://github.com/MarwaBS/nyc-real-estate-predictor) against NYC.gov 2024 Rolling Sales data. The flagship benchmark uses `schema-firewall` as a dependency, not a vendored copy. When the library breaks, the benchmark breaks. This is by design.
 
