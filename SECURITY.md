@@ -24,7 +24,7 @@ and pipeline functions you pass to it. It does not execute arbitrary
 code, open network sockets, or persist data. Plausible vulnerability
 classes are limited to:
 
-- Crashes or hangs on adversarial input frames.
+- Crashes or hangs on hostile input frames.
 - False negatives where a known-leaky pipeline passes a check.
 - Dependency-chain issues inherited from numpy, pandas, or scikit-learn.
 

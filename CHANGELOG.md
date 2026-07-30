@@ -151,7 +151,7 @@ regression test.
 - README LoC figure refreshed to the verified current count (372 code / 515
   raw) with a one-line reproduce command, so the "≤ 500 LoC" budget claim can't
   silently rot again.
-- README's "18-test adversarial suite in the flagship" citation replaced with
+- README's "18-test hostile-input suite in the flagship" citation replaced with
   what is verifiable from this repo: the parametrized forbidden-column test
   here (now including `SALE DATE`) plus the flagship's consuming CI job.
 
@@ -193,7 +193,7 @@ Includes one behavioral change (see below).
 - `examples/leakage_demo.ipynb` honest-path cell now operates on
   `df_honest = df.copy()` so the leaky-path cell can be re-run
   without contamination from a previously-executed honest cell. (#14)
-- README adversarial-test count: 27 -> 30 (verified via
+- README hostile-input-test count: 27 -> 30 (verified via
   `pytest --collect-only -q`).
 
 ### Fixed
@@ -271,7 +271,7 @@ Includes one behavioral change (see below).
 - `check_stateless(pipeline_fn, raw)` -- determinism + row-wise
   state-independence check. Catches mean encoders, frequency encoders,
   and other Santander-style cross-row leaks. Raises `StatelessnessError`.
-- Adversarial test suite (27 collected tests at release time).
+- Hostile-input test suite (27 collected tests at release time).
 - MIT license.
 
 [0.2.1]: https://github.com/MarwaBS/schema-firewall/compare/v0.2.0...v0.2.1

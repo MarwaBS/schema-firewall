@@ -11,7 +11,7 @@ pip install schema-firewall
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **Downstream usage (dogfood).** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.3` in `requirements.txt` and re-validates the integration in its `External Benchmark` CI job, which runs weekly and on pushes/PRs touching the benchmark's paths (path-filtered, not every push). It shows the library is used and CI-exercised downstream — not that every contract is enforced there. The pin is deliberate, not deferred. `0.1.3` predates the `0.2.0` variance-cap tail-sampling regression entirely — it samples every numeric column exhaustively — so the flagship was never exposed to that fail-open; and the flagship calls only `check_leakage` and `check_schema`, never `check_stateless`, so the affected surface is unreachable downstream regardless. `0.2.x` also switched the leakage-MI binning from quantile to dense-rank, which shifts the MI scale, so moving the pin would require re-measuring the flagship's `mi_threshold` (calibrated against `0.1.3`'s MI) — a measured change, not a version bump.
+> **Downstream usage.** Extracted from the firewall layer of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) — the flagship pins `schema-firewall==0.1.3` in `requirements.txt` and re-validates the integration in its `External Benchmark` CI job, which runs weekly and on pushes/PRs touching the benchmark's paths (path-filtered, not every push). It shows the library is used and CI-exercised downstream — not that every contract is enforced there. The pin is deliberate, not deferred. `0.1.3` predates the `0.2.0` variance-cap tail-sampling regression entirely — it samples every numeric column exhaustively — so the flagship was never exposed to that fail-open; and the flagship calls only `check_leakage` and `check_schema`, never `check_stateless`, so the affected surface is unreachable downstream regardless. `0.2.x` also switched the leakage-MI binning from quantile to dense-rank, which shifts the MI scale, so moving the pin would require re-measuring the flagship's `mi_threshold` (calibrated against `0.1.3`'s MI) — a measured change, not a version bump.
 
 ---
 
@@ -117,7 +117,7 @@ Three checks. One contract class. Four exceptions. That's the whole library.
 
 - **≤ 500 LoC** of core implementation across `src/schema_firewall/`, enforced by a test so the budget can't silently rot. Count the code lines yourself: `find src/schema_firewall -name '*.py' -exec grep -vhE '^\s*(#|$)' {} + | wc -l`.
 - **3 public check functions** — `check_leakage`, `check_schema`, `check_stateless`. No more.
-- **An adversarial test for every documented failure mode** (and a regression test for each fixed bug).
+- **A hostile-input test for every documented failure mode** (and a regression test for each fixed bug).
 - **Three dependencies:** `numpy`, `pandas`, `scikit-learn`. Nothing else.
 
 If `schema-firewall` is missing a check you need, the library is wrong for your use case. Build the check in-line. Its surface will not grow to absorb it.
