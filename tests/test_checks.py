@@ -1,4 +1,4 @@
-"""Adversarial test suite for schema-firewall.
+"""Hostile-input test suite for schema-firewall.
 
 Each test either injects a known failure and asserts the firewall
 raises, or exercises a legitimate path and asserts the firewall
