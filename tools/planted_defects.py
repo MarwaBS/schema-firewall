@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import os
 import shutil
 import subprocess
 import sys
@@ -90,7 +91,7 @@ REGISTRY: tuple[PlantedDefect, ...] = (
         check="check_leakage",
         failure_mode="permuted target index compared against the wrong rows",
         doc_file=_CHECKS,
-        doc_anchor="an unalignable ``y.index``",
+        doc_anchor="each feature value is compared against its own target",
         target_file=_CHECKS,
         old="y = y.reindex(X.index)",
         new="y = y",
@@ -216,8 +217,6 @@ def _copy_project(dst: Path) -> None:
 
 
 def _run_tests(project: Path, nodes: tuple[str, ...]) -> subprocess.CompletedProcess:
-    import os
-
     env = dict(os.environ, PYTHONPATH=str(project / "src"))
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "--no-cov", "-p", "no:cacheprovider", *nodes],
@@ -229,8 +228,6 @@ def _run_tests(project: Path, nodes: tuple[str, ...]) -> subprocess.CompletedPro
 
 
 def _assert_isolation(project: Path) -> None:
-    import os
-
     env = dict(os.environ, PYTHONPATH=str(project / "src"))
     probe = subprocess.run(
         [sys.executable, "-c", "import schema_firewall; print(schema_firewall.__file__)"],
@@ -240,7 +237,7 @@ def _assert_isolation(project: Path) -> None:
         text=True,
     )
     resolved = Path(probe.stdout.strip()).resolve()
-    if not str(resolved).startswith(str(project.resolve())):
+    if not resolved.is_relative_to(project.resolve()):
         sys.exit(f"ISOLATION FAILURE: tests would import {resolved}, not the throwaway copy")
 
 
