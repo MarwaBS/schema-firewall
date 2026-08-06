@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `check_stateless` samples imputation targets per column. The default spot-check
+  capped NaN-bearing rows at the first 10 across the union of all columns, so the
+  column with the most missing values spent the whole budget and a different
+  column's fill was never exercised. With one column constant-filled and another
+  filled from the frame mean, the leak escaped 96.8% of the time on a 200-row
+  frame once the first column carried 10 or more NaNs -- 0% below that, so the
+  cliff sat exactly at the cap. One row per column catches a fill that edits every
+  NaN row identically; three is where partial-fill detection flattens, at 30% more
+  pipeline calls on a 60-column frame. A fill touching only part of a column
+  remains a coverage floor, not a guarantee, and the README now says so rather
+  than presenting the cap as sufficient. Regression test:
+  `test_stateless_catches_imputation_behind_a_dirtier_column`.
+- The determinism check compares the two runs exactly. It used pandas' default
+  1e-5 relative tolerance while the docstring and README promised identical
+  frames, so an unseeded RNG perturbing below that passed. The row-level
+  comparison stays tolerant on purpose: it weighs a row computed inside the full
+  frame against the same row computed alone, and a frozen matrix product reaches
+  BLAS as dgemm one way and dgemv the other, so a strictly row-wise transform can
+  legitimately land a few ULPs apart. Regression tests:
+  `test_stateless_catches_drift_below_the_default_float_tolerance`,
+  `test_stateless_accepts_a_frozen_matrix_projection`.
+
+### Added
+- CI runs `tools/planted_defects.py`, so a test weakened to a tautology fails the
+  build while `pytest` stays green. Two failure modes registered for the
+  behaviours above; the README's mode count and the replay step's matrix guard
+  are both pinned by tests.
+
 ## [0.2.1] - 2026-07-24
 
 ### Fixed

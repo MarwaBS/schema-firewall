@@ -64,13 +64,33 @@ def test_every_registered_failure_mode_is_documented_and_tested():
 
 
 def test_readme_states_the_registry_size():
-    """The README quotes the mode count in three places. Registering a mode without
+    """The README quotes the mode count in four places. Registering a mode without
     updating them leaves the published figure describing a smaller registry."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     size = len(_registry())
     counted = re.findall(r"(?:registry of|all|each of the|floor for the) (\d+)", readme)
     quoted = {int(n) for n in counted}
     assert quoted == {size}, f"README quotes {sorted(quoted)} modes; the registry holds {size}"
+
+
+def test_ci_runs_the_replay_on_a_version_in_the_matrix():
+    """The replay runs on one interpreter, selected by an `if:` naming a version.
+    Retire that version from the matrix and the step stops running while the job
+    still reports success -- a gate that replays nothing, which is the failure the
+    replay exists to catch, one level up."""
+    workflow = (ROOT / ".github" / "workflows" / "python-package.yml").read_text(encoding="utf-8")
+    assert "python tools/planted_defects.py" in workflow, "CI does not run the replay"
+
+    matrix = re.search(r"python-version:\s*\[([^\]]+)\]", workflow)
+    assert matrix, "no python-version matrix found"
+    versions = set(re.findall(r"[\d.]+t?", matrix.group(1)))
+
+    guard = re.search(r"if:\s*matrix\.python-version\s*==\s*'([^']+)'", workflow)
+    assert guard, "the replay step has no matrix guard to check"
+    gated_on = guard.group(1)
+    assert gated_on in versions, (
+        f"the replay is gated on python {gated_on}, absent from the matrix {sorted(versions)}"
+    )
 
 
 def test_registry_covers_all_three_public_checks():

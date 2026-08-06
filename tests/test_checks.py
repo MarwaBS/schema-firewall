@@ -973,6 +973,22 @@ def test_stateless_catches_imputation_behind_a_dirtier_column():
         check_stateless(mixed_impute, df)
 
 
+def test_stateless_accepts_a_frozen_matrix_projection():
+    """A fixed linear projection is row-wise by construction, but the full frame
+    reaches BLAS as dgemm and a one-row subset as dgemv, so the two accumulate in
+    different orders and land a few ULPs apart. Any pre-fit sklearn transform --
+    PCA, a linear predictor -- has this shape, so a bit-exact row comparison would
+    call correct code state-dependent."""
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(rng.normal(size=(2_000, 8)), columns=[f"f{i}" for i in range(8)])
+    loading = rng.normal(size=(8, 3))
+
+    def project(df):
+        return pd.DataFrame(df.to_numpy() @ loading, index=df.index, columns=["a", "b", "c"])
+
+    assert check_stateless(project, frame) is None
+
+
 def test_stateless_catches_drift_below_the_default_float_tolerance():
     """Two runs that differ by 1e-9 on values near 1000 sit inside pandas' default
     1e-5 relative tolerance, so a tolerant comparison reports them equal. Real

@@ -32,11 +32,11 @@ _MIN_SAMPLES = 100
 # NaN rows are spot-checked per column rather than across their union: a single
 # budget shared by every column lets one dirty column spend it all, leaving the
 # column that actually leaks unchecked. One row per column already catches a fill
-# that edits every NaN row the same way (60/60 seeds) -- what fillna(df.mean())
-# does. Three roughly doubles detection when only half a column's NaN rows are
-# edited (34/60 -> 58/60) and costs ~30% more pipeline calls on a 60-column frame;
-# past three the curve flattens. A fill touching a small subset stays a coverage
-# floor, not a guarantee.
+# that edits every NaN row the same way -- what fillna(df.mean()) does -- at 60/60
+# seeds on every shape tried. Extra rows only buy partial fills, where detection
+# depends on how much of the column the fill touches and no cap makes it reliable;
+# three is where that curve flattens, and it costs 30% more pipeline calls on a
+# 60-column frame at 5% missingness (144 -> 187).
 _NAN_ROWS_PER_COLUMN = 3
 
 # --- Public: leakage detection ---------------------------------------
@@ -463,10 +463,14 @@ def check_stateless(
                 f"drops it."
             )
         try:
+            # Tolerant here, unlike the determinism check above: that one compares
+            # two runs of the SAME computation, this one compares a row computed
+            # inside the full frame against the same row computed alone. A frozen
+            # matrix product takes dgemm on the frame and dgemv on one row, so a
+            # strictly row-wise transform can still land a few ULPs apart.
             pd.testing.assert_frame_equal(
                 first.loc[[idx]].reset_index(drop=True),
                 single_out.reset_index(drop=True),
-                check_exact=True,
             )
         except AssertionError as exc:
             raise StatelessnessError(
