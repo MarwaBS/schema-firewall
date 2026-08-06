@@ -39,3 +39,12 @@ jobs:
         run: mypy src tests
       - name: Run pytest
         run: pytest
+      # A green suite does not show the suite would notice a behaviour going away.
+      # The replay disables each registered failure mode in a throwaway copy and
+      # requires its named tests to go red, so a test weakened to a tautology
+      # fails here while pytest stays green. One interpreter: it re-runs pytest
+      # once per registered mode, and what it measures is the suite's grip on the
+      # source, which does not vary across the matrix.
+      - name: Replay planted defects
+        if: matrix.python-version == '3.13'
+        run: python tools/planted_defects.py

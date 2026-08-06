@@ -29,6 +29,16 @@ from ._schema import SchemaContract
 # rather than guess.
 _MIN_SAMPLES = 100
 
+# NaN rows are spot-checked per column rather than across their union: a single
+# budget shared by every column lets one dirty column spend it all, leaving the
+# column that actually leaks unchecked. One row per column already catches a fill
+# that edits every NaN row the same way (60/60 seeds) -- what fillna(df.mean())
+# does. Three roughly doubles detection when only half a column's NaN rows are
+# edited (34/60 -> 58/60) and costs ~30% more pipeline calls on a 60-column frame;
+# past three the curve flattens. A fill touching a small subset stays a coverage
+# floor, not a guarantee.
+_NAN_ROWS_PER_COLUMN = 3
+
 # --- Public: leakage detection ---------------------------------------
 
 
@@ -312,10 +322,11 @@ def check_stateless(
             checking.
         raw: the input frame to exercise.
         sample_indices: rows to spot-check for state-independence. Default: every
-            numeric column's min/max tail rows, all NaN-bearing rows (capped at
-            10), and a fixed stride -- so a tail edit on any column is covered
-            regardless of that column's scale. Cost is two pipeline calls per
-            numeric column; pass an explicit list to bound it on very wide frames.
+            numeric column's min/max tail rows, each column's first few NaN rows,
+            and a fixed stride -- so a tail or imputation edit on any column is
+            covered regardless of that column's scale or how dirty its neighbours
+            are. Cost scales with column count, not frame length; pass an explicit
+            list to bound it on very wide frames, or every index for full cover.
 
     Raises:
         StatelessnessError: pipeline is non-deterministic or state-dependent
@@ -347,7 +358,10 @@ def check_stateless(
     second = pipeline_fn(raw.copy())
 
     try:
-        pd.testing.assert_frame_equal(first, second)
+        # check_exact: pandas defaults to rtol=1e-5, which passes an unseeded RNG
+        # perturbing values below that. Two runs of a deterministic pipeline agree
+        # bit-for-bit, so anything else is the defect this invariant names.
+        pd.testing.assert_frame_equal(first, second, check_exact=True)
     except AssertionError as exc:
         raise StatelessnessError(
             f"pipeline is non-deterministic (two runs differ):\n  {exc}"
@@ -396,7 +410,7 @@ def check_stateless(
         # Spot-check the rows a global transform is most likely to touch:
         #  - each numeric column's MIN and MAX rows -- winsorise/clip/robust-scale
         #    and quantile filters edit the tails;
-        #  - every row holding a NaN in any column -- global-mean/median
+        #  - the first few NaN rows OF EACH COLUMN -- global-mean/median
         #    imputation (df.fillna(df.mean())) edits exactly those, and a
         #    one-row subset can't reconstruct the global statistic;
         #  - an even fixed-stride spread for everything else: catch-all padding on
@@ -412,10 +426,8 @@ def check_stateless(
             if not s.empty:
                 picks.append(s.idxmin())
                 picks.append(s.idxmax())
-        # Rows with any missing value (imputation targets), capped so a
-        # NaN-heavy frame doesn't blow up the spot-check count.
-        nan_rows = kept.index[kept.isna().any(axis=1)]
-        picks.extend(nan_rows[:10])
+        for col in kept.columns:
+            picks.extend(kept.index[kept[col].isna()][:_NAN_ROWS_PER_COLUMN])
         step = max(1, n // 5)
         picks.extend(first.index[i] for i in range(0, n, step))
         seen: set = set()
@@ -454,6 +466,7 @@ def check_stateless(
             pd.testing.assert_frame_equal(
                 first.loc[[idx]].reset_index(drop=True),
                 single_out.reset_index(drop=True),
+                check_exact=True,
             )
         except AssertionError as exc:
             raise StatelessnessError(

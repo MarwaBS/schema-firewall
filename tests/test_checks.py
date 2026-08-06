@@ -7,6 +7,7 @@ does not raise. Parameterised where failure has multiple shapes.
 
 from __future__ import annotations
 
+import itertools
 import re
 import warnings
 
@@ -946,6 +947,46 @@ def test_core_loc_within_budget():
             if stripped and not stripped.startswith("#"):
                 code_lines += 1
     assert code_lines <= 500, f"core is {code_lines} LoC, over the 500 budget"
+
+
+def test_stateless_catches_imputation_behind_a_dirtier_column():
+    """A column that leaks must be spot-checked on its own NaN rows, not on
+    whatever rows a shared budget happens to reach first.
+
+    `legacy` carries 30 missing values at the front and a harmless constant fill;
+    `income` carries one, at row 97, filled from the frame mean. A NaN sample
+    drawn across all columns at once is spent entirely on `legacy`, and row 97 is
+    neither a tail nor a stride pick, so the leak is never exercised."""
+    legacy = np.arange(200, dtype=float)
+    legacy[:30] = np.nan
+    income = np.arange(200, dtype=float) * 7.0 + 1000.0
+    income[97] = np.nan
+    df = pd.DataFrame({"legacy": legacy, "income": income})
+
+    def mixed_impute(frame):
+        out = frame.copy()
+        out["legacy"] = out["legacy"].fillna(-1.0)
+        out["income"] = out["income"].fillna(out["income"].mean())
+        return out
+
+    with pytest.raises(StatelessnessError, match="state-dependent"):
+        check_stateless(mixed_impute, df)
+
+
+def test_stateless_catches_drift_below_the_default_float_tolerance():
+    """Two runs that differ by 1e-9 on values near 1000 sit inside pandas' default
+    1e-5 relative tolerance, so a tolerant comparison reports them equal. Real
+    nondeterminism -- thread-reduction order, unseeded RNG -- lands at that scale."""
+    df = pd.DataFrame({"x": np.arange(200, dtype=float) + 1000.0})
+    runs = itertools.count()
+
+    def drifting(frame):
+        out = frame.copy()
+        out["x"] = out["x"] + next(runs) * 1e-9
+        return out
+
+    with pytest.raises(StatelessnessError, match="non-deterministic"):
+        check_stateless(drifting, df)
 
 
 def test_source_is_ascii_only():

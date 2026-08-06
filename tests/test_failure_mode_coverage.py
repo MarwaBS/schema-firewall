@@ -63,6 +63,16 @@ def test_every_registered_failure_mode_is_documented_and_tested():
     assert not problems, "failure-mode registry out of sync:\n  " + "\n  ".join(problems)
 
 
+def test_readme_states_the_registry_size():
+    """The README quotes the mode count in three places. Registering a mode without
+    updating them leaves the published figure describing a smaller registry."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    size = len(_registry())
+    counted = re.findall(r"(?:registry of|all|each of the|floor for the) (\d+)", readme)
+    quoted = {int(n) for n in counted}
+    assert quoted == {size}, f"README quotes {sorted(quoted)} modes; the registry holds {size}"
+
+
 def test_registry_covers_all_three_public_checks():
     checks = {entry.check for entry in _registry()}
     assert checks == {"check_leakage", "check_schema", "check_stateless"}, (

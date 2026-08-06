@@ -151,9 +151,22 @@ REGISTRY: tuple[PlantedDefect, ...] = (
         doc_file="README.md",
         doc_anchor="Determinism check catches non-deterministic transforms.",
         target_file=_CHECKS,
-        old="pd.testing.assert_frame_equal(first, second)",
+        old="pd.testing.assert_frame_equal(first, second, check_exact=True)",
         new="pass",
         caught_by=("tests/test_checks.py::test_stateless_catches_nondeterministic_pipeline",),
+    ),
+    PlantedDefect(
+        defect_id="determinism-tolerance-relaxed",
+        check="check_stateless",
+        failure_mode="drift below pandas' default 1e-5 relative tolerance reads as equal",
+        doc_file="README.md",
+        doc_anchor="check_exact=True",
+        target_file=_CHECKS,
+        old="pd.testing.assert_frame_equal(first, second, check_exact=True)",
+        new="pd.testing.assert_frame_equal(first, second)",
+        caught_by=(
+            "tests/test_checks.py::test_stateless_catches_drift_below_the_default_float_tolerance",
+        ),
     ),
     PlantedDefect(
         defect_id="row-spot-check-disabled",
@@ -187,11 +200,27 @@ REGISTRY: tuple[PlantedDefect, ...] = (
         check="check_stateless",
         failure_mode="global-mean imputation edits only the NaN-bearing rows",
         doc_file="README.md",
-        doc_anchor="NaN-bearing rows",
+        doc_anchor="of each column separately",
         target_file=_CHECKS,
-        old="picks.extend(nan_rows[:10])",
-        new="picks.extend(nan_rows[:0])",
+        old="picks.extend(kept.index[kept[col].isna()][:_NAN_ROWS_PER_COLUMN])",
+        new="picks.extend(kept.index[kept[col].isna()][:0])",
         caught_by=("tests/test_checks.py::test_stateless_catches_global_mean_imputation",),
+    ),
+    PlantedDefect(
+        defect_id="nan-budget-shared-across-columns",
+        check="check_stateless",
+        failure_mode="a dirtier column spends the NaN budget the leaking column needed",
+        doc_file="README.md",
+        doc_anchor="a budget shared across columns is spent by whichever column is dirtiest",
+        target_file=_CHECKS,
+        old=(
+            "for col in kept.columns:\n"
+            "            picks.extend(kept.index[kept[col].isna()][:_NAN_ROWS_PER_COLUMN])"
+        ),
+        new="picks.extend(kept.index[kept.isna().any(axis=1)][:_NAN_ROWS_PER_COLUMN])",
+        caught_by=(
+            "tests/test_checks.py::test_stateless_catches_imputation_behind_a_dirtier_column",
+        ),
     ),
     PlantedDefect(
         defect_id="duplicate-index-guard-disabled",
