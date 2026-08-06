@@ -29,6 +29,25 @@ from ._schema import SchemaContract
 # rather than guess.
 _MIN_SAMPLES = 100
 
+# Per column, not across their union: a shared budget is spent by the dirtiest
+# column, leaving the one that leaks unsampled. One row catches a fill that edits
+# every NaN row alike; for a half-filled column the gain flattens after three
+# (68 -> 86 -> 94 -> 97%), and for a fill confined to a column's last rows no cap
+# helps, since picks come from the front.
+_NAN_ROWS_PER_COLUMN = 3
+
+# Widen the per-column pick until the total reaches this. Three rows is affordable
+# across sixty columns but halves detection on a lone dirty column (31% vs 78%).
+_NAN_ROWS_BUDGET = 10
+
+# A row computed inside the full frame and the same row computed alone are different
+# machine computations -- dgemm vs dgemv for a frozen matrix product -- so a strictly
+# row-wise transform lands ULPs apart. That artefact tops out at 8.7e-12 relative
+# (projections to inner dimension 512, centred inputs included); a frame-statistic
+# leak still reads 5.0e-9 on a 1e8-magnitude carrier. Past that carrier a mean shift
+# stops being separable from float noise.
+_ROW_RELATIVE_TOLERANCE = 1e-9
+
 # --- Public: leakage detection ---------------------------------------
 
 
@@ -312,10 +331,11 @@ def check_stateless(
             checking.
         raw: the input frame to exercise.
         sample_indices: rows to spot-check for state-independence. Default: every
-            numeric column's min/max tail rows, all NaN-bearing rows (capped at
-            10), and a fixed stride -- so a tail edit on any column is covered
-            regardless of that column's scale. Cost is two pipeline calls per
-            numeric column; pass an explicit list to bound it on very wide frames.
+            numeric column's min/max tail rows, each column's first few NaN rows,
+            and a fixed stride -- so a tail or imputation edit on any column is
+            covered regardless of that column's scale or how dirty its neighbours
+            are. Cost scales with column count, not frame length; pass an explicit
+            list to bound it on very wide frames, or every index for full cover.
 
     Raises:
         StatelessnessError: pipeline is non-deterministic or state-dependent
@@ -347,7 +367,9 @@ def check_stateless(
     second = pipeline_fn(raw.copy())
 
     try:
-        pd.testing.assert_frame_equal(first, second)
+        # Exact, not the 1e-5 default: two runs of one computation agree bit-for-bit,
+        # so an unseeded RNG perturbing below that default is the defect named here.
+        pd.testing.assert_frame_equal(first, second, check_exact=True)
     except AssertionError as exc:
         raise StatelessnessError(
             f"pipeline is non-deterministic (two runs differ):\n  {exc}"
@@ -396,7 +418,7 @@ def check_stateless(
         # Spot-check the rows a global transform is most likely to touch:
         #  - each numeric column's MIN and MAX rows -- winsorise/clip/robust-scale
         #    and quantile filters edit the tails;
-        #  - every row holding a NaN in any column -- global-mean/median
+        #  - the first few NaN rows OF EACH COLUMN -- global-mean/median
         #    imputation (df.fillna(df.mean())) edits exactly those, and a
         #    one-row subset can't reconstruct the global statistic;
         #  - an even fixed-stride spread for everything else: catch-all padding on
@@ -412,10 +434,10 @@ def check_stateless(
             if not s.empty:
                 picks.append(s.idxmin())
                 picks.append(s.idxmax())
-        # Rows with any missing value (imputation targets), capped so a
-        # NaN-heavy frame doesn't blow up the spot-check count.
-        nan_rows = kept.index[kept.isna().any(axis=1)]
-        picks.extend(nan_rows[:10])
+        dirty = int(kept.isna().any(axis=0).sum())
+        per_column = max(_NAN_ROWS_PER_COLUMN, _NAN_ROWS_BUDGET // max(1, dirty))
+        for col in kept.columns:
+            picks.extend(kept.index[kept[col].isna()][:per_column])
         step = max(1, n // 5)
         picks.extend(first.index[i] for i in range(0, n, step))
         seen: set = set()
@@ -454,6 +476,8 @@ def check_stateless(
             pd.testing.assert_frame_equal(
                 first.loc[[idx]].reset_index(drop=True),
                 single_out.reset_index(drop=True),
+                rtol=_ROW_RELATIVE_TOLERANCE,
+                atol=0,
             )
         except AssertionError as exc:
             raise StatelessnessError(

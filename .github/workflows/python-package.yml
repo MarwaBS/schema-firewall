@@ -39,3 +39,9 @@ jobs:
         run: mypy src tests
       - name: Run pytest
         run: pytest
+      # A test weakened to a tautology leaves pytest green; the replay disables each
+      # registered behaviour and requires its named tests to go red. One interpreter,
+      # because it re-runs pytest per mode and measures the suite, not the runtime.
+      - name: Replay planted defects
+        if: matrix.python-version == '3.13'
+        run: python tools/planted_defects.py
