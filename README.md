@@ -128,7 +128,7 @@ If `schema-firewall` is missing a check you need, the library is wrong for your 
 
 The constraint above is backed by a check you can re-run yourself.
 
-`tools/planted_defects.py` carries a registry of 16 failure modes — one per documented behaviour across the three checks. Each entry names the documentation that describes the behaviour, the exact source edit that disables it, and the tests that must fail once it is disabled. Running the script copies the project to a throwaway directory, verifies that copy is what gets imported (not an installed build), runs the named tests untouched as a control, then plants each defect in turn and requires its tests to go red. A defect that no test catches exits non-zero.
+`tools/planted_defects.py` carries a registry of 18 failure modes — one per documented behaviour across the three checks. Each entry names the documentation that describes the behaviour, the exact source edit that disables it, and the tests that must fail once it is disabled. Running the script copies the project to a throwaway directory, verifies that copy is what gets imported (not an installed build), runs the named tests untouched as a control, then plants each defect in turn and requires its tests to go red. A defect that no test catches exits non-zero.
 
 ```console
 $ python tools/planted_defects.py
@@ -136,12 +136,12 @@ control: 18 named tests green on pristine copy
 CAUGHT   leakage-raise-disabled
 CAUGHT   mi-detector-disabled
 ...
-all 16 planted defects caught; controls green
+all 18 planted defects caught; controls green
 ```
 
 `tests/test_failure_mode_coverage.py` keeps the registry from rotting inside the ordinary suite: every entry's documentation anchor must still exist, every named test must still exist, every planted edit must still match exactly one place in the source, and the registry must cover all three public checks. Delete a test or reword the docs and the suite fails.
 
-What this establishes: each of the 16 registered failure modes has at least one test that fails when the behaviour is removed. What it does not establish: that the registry is every way this library can break, that the suite is strong against defects nobody planted, or that the registry is complete — the check runs from the registry outwards, so documenting a new failure mode without registering it goes unnoticed. It is a coverage floor for the 16 registered modes, not a mutation score.
+What this establishes: each of the 18 registered failure modes has at least one test that fails when the behaviour is removed. What it does not establish: that the registry is every way this library can break, that the suite is strong against defects nobody planted, or that the registry is complete — the check runs from the registry outwards, so documenting a new failure mode without registering it goes unnoticed. It is a coverage floor for the 18 registered modes, not a mutation score.
 
 ---
 

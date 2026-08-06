@@ -29,15 +29,24 @@ from ._schema import SchemaContract
 # rather than guess.
 _MIN_SAMPLES = 100
 
-# NaN rows are spot-checked per column rather than across their union: a single
-# budget shared by every column lets one dirty column spend it all, leaving the
-# column that actually leaks unchecked. One row per column already catches a fill
-# that edits every NaN row the same way -- what fillna(df.mean()) does -- at 60/60
-# seeds on every shape tried. Extra rows only buy partial fills, where detection
-# depends on how much of the column the fill touches and no cap makes it reliable;
-# three is where that curve flattens, and it costs 30% more pipeline calls on a
-# 60-column frame at 5% missingness (144 -> 187).
+# Per column, not across their union: a shared budget is spent by the dirtiest
+# column, leaving the one that leaks unsampled. One row catches a fill that edits
+# every NaN row alike; for a half-filled column the gain flattens after three
+# (68 -> 86 -> 94 -> 97%), and for a fill confined to a column's last rows no cap
+# helps, since picks come from the front.
 _NAN_ROWS_PER_COLUMN = 3
+
+# Widen the per-column pick until the total reaches this. Three rows is affordable
+# across sixty columns but halves detection on a lone dirty column (31% vs 78%).
+_NAN_ROWS_BUDGET = 10
+
+# A row computed inside the full frame and the same row computed alone are different
+# machine computations -- dgemm vs dgemv for a frozen matrix product -- so a strictly
+# row-wise transform lands ULPs apart. That artefact tops out at 8.7e-12 relative
+# (projections to inner dimension 512, centred inputs included); a frame-statistic
+# leak still reads 5.0e-9 on a 1e8-magnitude carrier. Past that carrier a mean shift
+# stops being separable from float noise.
+_ROW_RELATIVE_TOLERANCE = 1e-9
 
 # --- Public: leakage detection ---------------------------------------
 
@@ -358,9 +367,8 @@ def check_stateless(
     second = pipeline_fn(raw.copy())
 
     try:
-        # check_exact: pandas defaults to rtol=1e-5, which passes an unseeded RNG
-        # perturbing values below that. Two runs of a deterministic pipeline agree
-        # bit-for-bit, so anything else is the defect this invariant names.
+        # Exact, not the 1e-5 default: two runs of one computation agree bit-for-bit,
+        # so an unseeded RNG perturbing below that default is the defect named here.
         pd.testing.assert_frame_equal(first, second, check_exact=True)
     except AssertionError as exc:
         raise StatelessnessError(
@@ -426,8 +434,10 @@ def check_stateless(
             if not s.empty:
                 picks.append(s.idxmin())
                 picks.append(s.idxmax())
+        dirty = int(kept.isna().any(axis=0).sum())
+        per_column = max(_NAN_ROWS_PER_COLUMN, _NAN_ROWS_BUDGET // max(1, dirty))
         for col in kept.columns:
-            picks.extend(kept.index[kept[col].isna()][:_NAN_ROWS_PER_COLUMN])
+            picks.extend(kept.index[kept[col].isna()][:per_column])
         step = max(1, n // 5)
         picks.extend(first.index[i] for i in range(0, n, step))
         seen: set = set()
@@ -463,14 +473,11 @@ def check_stateless(
                 f"drops it."
             )
         try:
-            # Tolerant here, unlike the determinism check above: that one compares
-            # two runs of the SAME computation, this one compares a row computed
-            # inside the full frame against the same row computed alone. A frozen
-            # matrix product takes dgemm on the frame and dgemv on one row, so a
-            # strictly row-wise transform can still land a few ULPs apart.
             pd.testing.assert_frame_equal(
                 first.loc[[idx]].reset_index(drop=True),
                 single_out.reset_index(drop=True),
+                rtol=_ROW_RELATIVE_TOLERANCE,
+                atol=0,
             )
         except AssertionError as exc:
             raise StatelessnessError(

@@ -202,9 +202,33 @@ REGISTRY: tuple[PlantedDefect, ...] = (
         doc_file="README.md",
         doc_anchor="of each column separately",
         target_file=_CHECKS,
-        old="picks.extend(kept.index[kept[col].isna()][:_NAN_ROWS_PER_COLUMN])",
+        old="picks.extend(kept.index[kept[col].isna()][:per_column])",
         new="picks.extend(kept.index[kept[col].isna()][:0])",
         caught_by=("tests/test_checks.py::test_stateless_catches_global_mean_imputation",),
+    ),
+    PlantedDefect(
+        defect_id="lone-dirty-column-not-widened",
+        check="check_stateless",
+        failure_mode="a frame with one dirty column is sampled only three rows deep",
+        doc_file=_CHECKS,
+        doc_anchor="Widen the per-column pick until the total reaches this",
+        target_file=_CHECKS,
+        old="per_column = max(_NAN_ROWS_PER_COLUMN, _NAN_ROWS_BUDGET // max(1, dirty))",
+        new="per_column = _NAN_ROWS_PER_COLUMN",
+        caught_by=("tests/test_checks.py::test_stateless_samples_a_lone_dirty_column_more_deeply",),
+    ),
+    PlantedDefect(
+        defect_id="row-tolerance-relaxed-to-default",
+        check="check_stateless",
+        failure_mode="a frame statistic on a large carrier hides under the default tolerance",
+        doc_file=_CHECKS,
+        doc_anchor="stops being separable from float noise",
+        target_file=_CHECKS,
+        old="rtol=_ROW_RELATIVE_TOLERANCE,",
+        new="rtol=1e-5,",
+        caught_by=(
+            "tests/test_checks.py::test_stateless_catches_a_frame_statistic_on_a_large_carrier",
+        ),
     ),
     PlantedDefect(
         defect_id="nan-budget-shared-across-columns",
@@ -215,9 +239,9 @@ REGISTRY: tuple[PlantedDefect, ...] = (
         target_file=_CHECKS,
         old=(
             "for col in kept.columns:\n"
-            "            picks.extend(kept.index[kept[col].isna()][:_NAN_ROWS_PER_COLUMN])"
+            "            picks.extend(kept.index[kept[col].isna()][:per_column])"
         ),
-        new="picks.extend(kept.index[kept.isna().any(axis=1)][:_NAN_ROWS_PER_COLUMN])",
+        new="picks.extend(kept.index[kept.isna().any(axis=1)][:per_column])",
         caught_by=(
             "tests/test_checks.py::test_stateless_catches_imputation_behind_a_dirtier_column",
         ),

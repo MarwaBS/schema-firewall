@@ -989,6 +989,50 @@ def test_stateless_accepts_a_frozen_matrix_projection():
     assert check_stateless(project, frame) is None
 
 
+@pytest.mark.parametrize("carrier", [1e2, 1e6, 1e8], ids=["small", "large", "huge"])
+def test_stateless_catches_a_frame_statistic_on_a_large_carrier(carrier):
+    """A frame mean added to a large-magnitude column shows up as a tiny RELATIVE
+    gap -- 9.4e-07 at a 1e6 carrier, 5.0e-09 at 1e8. Pandas' default 1e-5 tolerance
+    swallows both, which is why the row comparison carries a derived one."""
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(
+        {
+            "price": rng.normal(carrier, carrier / 20, 500),
+            "discount": rng.normal(5.0, 1.0, 500),
+        }
+    )
+
+    def shift_by_frame_mean(frame):
+        out = frame.copy()
+        out["price"] = out["price"] + out["discount"].mean()
+        return out
+
+    with pytest.raises(StatelessnessError, match="state-dependent"):
+        check_stateless(shift_by_frame_mean, df)
+
+
+def test_stateless_samples_a_lone_dirty_column_more_deeply():
+    """Three rows per column is affordable across sixty columns, but a frame with
+    one dirty column would then be spot-checked three rows deep where the budget
+    allows ten. A fill touching part of that column is missed at roughly twice the
+    rate when the sample does not widen."""
+    rng = np.random.default_rng(3)
+    values = rng.normal(100, 10, 300)
+    nan_rows = list(range(0, 20))
+    values[nan_rows] = np.nan
+    df = pd.DataFrame({"only": values})
+    edited = set(nan_rows[6:10])  # past a three-row sample, inside a ten-row one
+
+    def partial_fill(frame):
+        out = frame.copy()
+        mask = out["only"].isna() & out.index.isin(edited)
+        out.loc[mask, "only"] = out["only"].mean()
+        return out.fillna(-1.0)
+
+    with pytest.raises(StatelessnessError, match="state-dependent"):
+        check_stateless(partial_fill, df)
+
+
 def test_stateless_catches_drift_below_the_default_float_tolerance():
     """Two runs that differ by 1e-9 on values near 1000 sit inside pandas' default
     1e-5 relative tolerance, so a tolerant comparison reports them equal. Real
