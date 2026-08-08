@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-08
+
 ### Fixed
 - `check_stateless` samples imputation targets per column. The default spot-check
   capped NaN-bearing rows at the first 10 across the union of all columns, so the
@@ -305,6 +307,7 @@ Includes one behavioral change (see below).
 - Hostile-input test suite (27 collected tests at release time).
 - MIT license.
 
+[0.2.2]: https://github.com/MarwaBS/schema-firewall/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/MarwaBS/schema-firewall/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.2...v0.1.3

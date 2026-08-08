@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Advisories are disclosed against unchanged pins, so the CVE gate below
+  # decays between pushes. The cron re-runs it against the live feed.
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
@@ -37,6 +41,16 @@ jobs:
         run: ruff format --check .
       - name: Type-check (mypy)
         run: mypy src tests
+      - name: Spell check (codespell)
+        run: codespell $(git ls-files '*.md' '*.py' '*.toml' '*.yml' '*.cfg')
+      # Freeze first: the project is installed editable, and auditing the
+      # environment makes pip-audit fail on this package's own unreleased
+      # version rather than on a dependency.
+      - name: Dependency CVE gate (pip-audit)
+        if: matrix.python-version == '3.13'
+        run: |
+          pip freeze --exclude-editable > /tmp/deps.txt
+          pip-audit --strict --progress-spinner off -r /tmp/deps.txt
       - name: Run pytest
         run: pytest
       # A test weakened to a tautology leaves pytest green; the replay disables each

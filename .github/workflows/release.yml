@@ -27,8 +27,18 @@ jobs:
         run: ruff format --check .
       - name: Type-check (mypy)
         run: mypy src tests
+      - name: Spell check (codespell)
+        run: codespell $(git ls-files '*.md' '*.py' '*.toml' '*.yml' '*.cfg')
+      # Freeze first: the project is installed editable, and auditing the
+      # environment makes pip-audit fail on this package's own version.
+      - name: Dependency CVE gate (pip-audit)
+        run: |
+          pip freeze --exclude-editable > /tmp/deps.txt
+          pip-audit --strict --progress-spinner off -r /tmp/deps.txt
       - name: Run pytest
         run: pytest
+      - name: Replay planted defects
+        run: python tools/planted_defects.py
 
   publish:
     needs: test
