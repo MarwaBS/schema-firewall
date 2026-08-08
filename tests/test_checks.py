@@ -949,6 +949,17 @@ def test_core_loc_within_budget():
     assert code_lines <= 500, f"core is {code_lines} LoC, over the 500 budget"
 
 
+def test_schema_refuses_multiindex_columns_instead_of_passing_them():
+    """A tuple label never equals a flat contract name, so the forbidden gate
+    matched nothing and returned clean while `required_columns` reported the same
+    frame as missing everything. Both refuse now."""
+    df = pd.DataFrame(
+        [[1.0, 2.0]], columns=pd.MultiIndex.from_tuples([("a", "SALE PRICE"), ("a", "safe")])
+    )
+    with pytest.raises(ValueError, match="MultiIndex"):
+        check_schema(df, SchemaContract(forbidden_columns=frozenset({"SALE PRICE"})))
+
+
 def test_stateless_catches_a_winsorise_on_a_column_the_pipeline_derives():
     """Tail targeting must read the frame the pipeline returns, not only the one
     it was given.
