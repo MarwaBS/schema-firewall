@@ -96,10 +96,10 @@ def check_leakage(
     continuous (or integer-encoded) target. Encode classification labels (e.g.
     ``LabelEncoder``) before calling.
 
-    Bool feature columns are inspected (True/False as 1/0). Non-numeric
-    (object/string) FEATURE columns are NOT: a stringified target copy in one is
-    reported with a warning, not a raise. Encode such columns before calling, or
-    filter that warning to an error to fail closed on them.
+    Bool feature columns are inspected (True/False as 1/0). Non-numeric FEATURE
+    columns are NOT, object and string but datetime, timedelta and category too:
+    a target copy in one is reported with a warning, not a raise. Encode them
+    before calling, or filter that warning to an error to fail closed.
 
     ``mi_threshold`` is an adjusted-MI threshold in [0, 1] (default 0.2):
     deterministic dependence -- copies, k-class/binary target encodings, and
@@ -243,7 +243,8 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
 
     Failure modes, in order:
 
-    0. X has duplicate column names -> ValueError (malformed input).
+    0. X has duplicate column names, or MultiIndex columns whose levels the
+       contract cannot address -> ValueError (malformed input).
     1. Any ``forbidden_columns`` entry is present in X -> SchemaError.
        Name matching is exact and case-sensitive: ``"sale price"`` does
        not match a ``"SALE PRICE"`` contract entry.
@@ -251,6 +252,11 @@ def check_schema(X: pd.DataFrame, contract: SchemaContract) -> None:
     3. Any column listed in ``contract.dtypes`` has a mismatched
        dtype -> SchemaError.
     """
+    # A tuple label never equals a contract's flat name, so forbidden_columns
+    # would pass silently while required_columns fails. Refuse both instead.
+    if isinstance(X.columns, pd.MultiIndex):
+        raise ValueError("check_schema: X has MultiIndex columns; flatten them first.")
+
     if not X.columns.is_unique:
         dupes = X.columns[X.columns.duplicated()].unique().tolist()
         raise ValueError(f"check_schema: X has duplicate column names {dupes}.")
