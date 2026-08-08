@@ -949,6 +949,50 @@ def test_core_loc_within_budget():
     assert code_lines <= 500, f"core is {code_lines} LoC, over the 500 budget"
 
 
+def test_stateless_catches_a_winsorise_on_a_column_the_pipeline_derives():
+    """Tail targeting must read the frame the pipeline returns, not only the one
+    it was given.
+
+    `ppsf` exists nowhere in `raw`, so its min/max rows are invisible to a sample
+    drawn from the input alone; the clip edits exactly those rows. Measured over
+    40 seeds before the output frame was sampled: 14 escaped."""
+    rng = np.random.default_rng(2)
+    raw = pd.DataFrame(
+        {
+            "sqft": rng.lognormal(7.0, 0.4, 200),
+            "price": rng.lognormal(12.0, 0.5, 200),
+        }
+    )
+
+    def ppsf_winsor(frame):
+        out = frame.copy()
+        out["ppsf"] = out["price"] / out["sqft"]
+        out["ppsf"] = out["ppsf"].clip(upper=out["ppsf"].quantile(0.99))
+        return out
+
+    with pytest.raises(StatelessnessError):
+        check_stateless(ppsf_winsor, raw)
+
+
+def test_stateless_catches_a_duplicate_flag_read_across_rows():
+    """`duplicated()` reads the whole frame, so the flagged row is True together
+    and False alone. It is extreme in no input column and carries no NaN, so only
+    the derived column's own tail reaches it. Escaped 40 of 40 seeds before."""
+    rng = np.random.default_rng(3)
+    raw = pd.DataFrame(
+        {"sqft": rng.lognormal(7.0, 0.4, 200), "price": rng.lognormal(12.0, 0.5, 200)}
+    )
+    raw.iloc[137] = raw.iloc[42]
+
+    def dup_flag(frame):
+        out = frame.copy()
+        out["is_dup"] = out.duplicated(subset=["sqft", "price"])
+        return out
+
+    with pytest.raises(StatelessnessError):
+        check_stateless(dup_flag, raw)
+
+
 def test_stateless_catches_imputation_behind_a_dirtier_column():
     """A column that leaks must be spot-checked on its own NaN rows, not on
     whatever rows a shared budget happens to reach first.
