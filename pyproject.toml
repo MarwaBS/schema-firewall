@@ -41,6 +41,8 @@ dev = [
     "mypy>=1.11",
     "pandas-stubs",
     "ruff>=0.6,<0.16",  # bounded: 0.16 reformats README code fences, so the format gate must pin a known line
+    "codespell>=2.3",
+    "pip-audit>=2.7",
 ]
 
 [project.urls]
