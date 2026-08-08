@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.2] - 2026-08-08
 
 ### Fixed
+- `check_stateless` targets the tails of the frame the pipeline returns, not only
+  the one it was given. A column the pipeline derives has its min and max rows
+  nowhere in the input, so a transform editing exactly those rows returned clean.
+  Winsorising a price-per-sqft ratio escaped 14 of 40 seeds at n=200 and 14 of 40
+  at n=1000; a `duplicated()` flag escaped 40 of 40 at both sizes, because the
+  flagged row is extreme in no input column and carries no NaN. Both raise now,
+  0 of 40 and 0 of 40, at no extra pipeline calls. Regression tests:
+  `test_stateless_catches_a_winsorise_on_a_column_the_pipeline_derives`,
+  `test_stateless_catches_a_duplicate_flag_read_across_rows`.
+- `check_schema` refuses MultiIndex columns instead of silently matching none of
+  them. A tuple label never equals a flat contract name, so `forbidden_columns`
+  passed a frame carrying `SALE PRICE` under a level while `required_columns`
+  reported that same frame as missing everything. Regression test:
+  `test_schema_refuses_multiindex_columns_instead_of_passing_them`.
+- `check_leakage`'s docstring said object and string feature columns go
+  uninspected; datetime, timedelta and category do too. The runtime warning
+  already named them correctly, so only the docstring was narrow.
 - `check_stateless` samples imputation targets per column. The default spot-check
   capped NaN-bearing rows at the first 10 across the union of all columns, so the
   column with the most missing values spent the whole budget and a different
@@ -33,6 +50,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test_stateless_accepts_a_frozen_matrix_projection`.
 
 ### Added
+- A CVE gate (`pip-audit`) and a spell check run in both workflows, and the test
+  workflow gains a weekly cron: advisories are disclosed against pins that do not
+  move, so a gate that only runs on push decays between releases. `pip-audit`
+  reads a frozen list rather than the environment, which holds this project's own
+  unreleased version and is not on PyPI. The release workflow also gains the
+  planted-defect replay, which only the test workflow ran.
+- Two failure modes registered for the tail-sampling fix above, and one for the
+  MI bin-edge choice, which nothing covered: dividing by `x.size` instead of
+  `uniq.size` restores observation-quantile binning and turns the zero-inflated
+  tests red. The registry holds 20.
 - CI runs `tools/planted_defects.py`, so a test weakened to a tautology fails the
   build while `pytest` stays green. Two failure modes registered for the
   behaviours above; the README's mode count and the replay step's matrix guard
