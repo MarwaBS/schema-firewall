@@ -428,12 +428,15 @@ def check_stateless(
         # the strongest, at one pipeline call per row.)
         picks: list[Hashable] = []
         kept = raw.loc[first.index]
-        kept_numeric = kept.select_dtypes(include=[np.number])
-        for col in kept_numeric.columns:
-            s = kept_numeric[col].dropna()
-            if not s.empty:
-                picks.append(s.idxmin())
-                picks.append(s.idxmax())
+        # The output's tails too: a derived column's tails are nowhere in raw,
+        # so targeting raw alone never samples the rows the pipeline edits.
+        out = first.astype({c: float for c in first.select_dtypes(include=["bool"])})
+        for frame in (kept, out):
+            for col in frame.select_dtypes(include=[np.number]).columns:
+                s = frame[col].dropna()
+                if not s.empty:
+                    picks.append(s.idxmin())
+                    picks.append(s.idxmax())
         dirty = int(kept.isna().any(axis=0).sum())
         per_column = max(_NAN_ROWS_PER_COLUMN, _NAN_ROWS_BUDGET // max(1, dirty))
         for col in kept.columns:

@@ -54,6 +54,33 @@ REGISTRY: tuple[PlantedDefect, ...] = (
         ),
     ),
     PlantedDefect(
+        defect_id="mi-binning-quantile-restored",
+        check="check_leakage",
+        failure_mode="zero-inflated feature collapses every observation into one bin",
+        doc_file="README.md",
+        doc_anchor="NON-monotone and discrete deterministic leakage",
+        target_file=_CHECKS,
+        old="return ((ranks * n_bins) // uniq.size).astype(np.int64)",
+        new="return ((ranks * n_bins) // x.size).astype(np.int64)",
+        caught_by=(
+            "tests/test_checks.py::test_leakage_catches_zero_inflated_square_collapse_region",
+        ),
+    ),
+    PlantedDefect(
+        defect_id="output-tail-targeting-disabled",
+        check="check_stateless",
+        failure_mode="global transform edits only the tails of a column the pipeline derives",
+        doc_file="README.md",
+        doc_anchor="min/max rows of every numeric column",
+        target_file=_CHECKS,
+        old="for frame in (kept, out):",
+        new="for frame in (kept,):",
+        caught_by=(
+            "tests/test_checks.py::test_stateless_catches_a_winsorise_on_a_column_the_pipeline_derives",
+            "tests/test_checks.py::test_stateless_catches_a_duplicate_flag_read_across_rows",
+        ),
+    ),
+    PlantedDefect(
         defect_id="mi-detector-disabled",
         check="check_leakage",
         failure_mode="non-monotone deterministic dependency (squares, abs, k-class encodings)",
@@ -189,7 +216,7 @@ REGISTRY: tuple[PlantedDefect, ...] = (
         doc_file="README.md",
         doc_anchor="min/max rows of every numeric column",
         target_file=_CHECKS,
-        old="picks.append(s.idxmin())\n                picks.append(s.idxmax())",
+        old="picks.append(s.idxmin())\n                    picks.append(s.idxmax())",
         new="pass",
         caught_by=(
             "tests/test_checks.py::test_stateless_catches_tail_edit_on_low_variance_wide_frame",
