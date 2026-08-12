@@ -502,8 +502,6 @@ def _safe_corr(a: np.ndarray, b: np.ndarray, *, method: Literal["pearson", "spea
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     mask = np.isfinite(a) & np.isfinite(b)
-    if mask.sum() < 2:
-        return 0.0
     a, b = a[mask], b[mask]
     if a.std() == 0 or b.std() == 0:
         return 0.0

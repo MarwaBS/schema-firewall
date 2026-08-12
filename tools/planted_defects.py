@@ -37,6 +37,11 @@ class PlantedDefect:
 
 _CHECKS = "src/schema_firewall/_checks.py"
 
+# Every child bounded. Slowest measured child is the 25-node control run at
+# 7.8s, so 300 fires only on a hang. It has to stay under the tightest job
+# ceiling, `timeout-minutes: 10`, or CI is cancelled before the bound can fire.
+_CHILD_TIMEOUT_S = 300
+
 REGISTRY: tuple[PlantedDefect, ...] = (
     PlantedDefect(
         defect_id="leakage-raise-disabled",
@@ -304,6 +309,7 @@ def _run_tests(project: Path, nodes: tuple[str, ...]) -> subprocess.CompletedPro
         env=env,
         capture_output=True,
         text=True,
+        timeout=_CHILD_TIMEOUT_S,
     )
 
 
@@ -315,6 +321,7 @@ def _assert_isolation(project: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        timeout=_CHILD_TIMEOUT_S,
     )
     resolved = Path(probe.stdout.strip()).resolve()
     if not resolved.is_relative_to(project.resolve()):
