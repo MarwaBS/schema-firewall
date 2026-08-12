@@ -85,7 +85,13 @@ def test_ci_runs_the_replay_on_a_version_in_the_matrix():
     assert matrix, "no python-version matrix found"
     versions = set(re.findall(r"[\d.]+t?", matrix.group(1)))
 
-    guard = re.search(r"if:\s*matrix\.python-version\s*==\s*'([^']+)'", workflow)
+    # Anchored to the replay step's own name. A bare search returns the FIRST
+    # guard in the file, which belongs to the pip-audit step; the two carry the
+    # same version today, so an unanchored read passes by coincidence.
+    guard = re.search(
+        r"name:\s*Replay planted defects\s*\n\s*if:\s*matrix\.python-version\s*==\s*'([^']+)'",
+        workflow,
+    )
     assert guard, "the replay step has no matrix guard to check"
     gated_on = guard.group(1)
     assert gated_on in versions, (
