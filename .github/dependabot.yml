@@ -1,0 +1,13 @@
+version: 2
+
+updates:
+  # github-actions only. pyproject holds the runtime dependencies as ranges on
+  # purpose, and Dependabot answers a range by proposing a wider one. The ruff
+  # ceiling at <0.16 is the case that shows why: it is deliberate, with its
+  # reason written at the pin. Action versions carry no such intent.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
