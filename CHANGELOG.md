@@ -140,10 +140,10 @@ regression test.
 - `check_stateless` now catches global-statistic row filters in two ways: an
   empty one-row output for a kept row fails (was silently skipped via
   `continue`), AND the default spot-check now includes each numeric column's
-  extreme-value rows — so tail-only transforms (winsorise/clip/robust-scale,
+  extreme-value rows - so tail-only transforms (winsorise/clip/robust-scale,
   quantile filters) are caught deterministically instead of ~79% of the time.
 - `check_stateless` now spot-checks NaN-bearing rows too, so global-mean/median
-  imputation (`df.fillna(df.mean())`) — the canonical fit-on-full-data leak — is
+  imputation (`df.fillna(df.mean())`) - the canonical fit-on-full-data leak - is
   caught even when the NaN sits off the min/max/stride sample.
 - `check_stateless` rejects a non-unique index (the per-row spot-check selects
   by label, so duplicate labels made it vacuous and a global transform passed).
@@ -169,12 +169,12 @@ regression test.
   invisible). The final detector discretises low-cardinality values one-per-bin
   and continuous values into sqrt(n) quantile bins, and scores adjusted MI:
   genuinely in `[0, 1]`, ~0 under independence regardless of sample size, ~1
-  when a feature determines the target — copy, binary/k-class encoding, OR
+  when a feature determines the target - copy, binary/k-class encoding, OR
   non-monotone transform. Verified 0% miss on those leak fixtures and 0 false
   positives on independent / weakly-correlated columns, across seeds at n >= 100.
   It scores raw target dependence, not its source, so a *strong honest linear*
   predictor also crosses the threshold (measured: majority-flagged by `|r| >=
-  0.85`) — deliberate for a leakage firewall; see the `check_leakage` docstring.
+  0.85`) - deliberate for a leakage firewall; see the `check_leakage` docstring.
   Default `mi_threshold` recalibrated to `0.2`.
 - The example demo's `check_stateless` branch now exits non-zero if the check
   misses the leak, so the README's "both checks raise" claim is enforced by
@@ -183,7 +183,7 @@ regression test.
 ### CI / tooling
 - Removed the hardcoded `python_version = "3.10"` from `[tool.mypy]`: it made
   the gate fail on any fresh install under Python >= 3.12 (which resolves
-  numpy >= 2.5, whose stubs use PEP 695 `type` statements — a syntax error in
+  numpy >= 2.5, whose stubs use PEP 695 `type` statements - a syntax error in
   3.10 mode). mypy now checks at the running interpreter, so each CI matrix
   job validates its own resolved dependency universe; the 3.10 job still
   enforces the 3.10 floor.
@@ -192,7 +192,7 @@ regression test.
   version contradicts its tag.
 - `tests/test_demo.py` now parses the claimed R² values out of README.md
   instead of hardcoding a copy next to a (previously drifted) line-number
-  citation — the README is the single source of truth and the reference
+  citation - the README is the single source of truth and the reference
   cannot drift again.
 - CI runs `ruff check`, `ruff format --check`, and `mypy src` (matching the
   CONTRIBUTING promise) and adds Python 3.13 to the matrix and classifiers.
@@ -204,7 +204,7 @@ regression test.
   actual so it absorbs churn without being vacuous.
 
 ### Docs
-- README "Default samples five spread indices" corrected — it described the
+- README "Default samples five spread indices" corrected - it described the
   pre-0.1.3 stride-only sampler. `check_stateless` now spot-checks each numeric
   column's min/max row, every NaN-bearing row, and a fixed-stride spread; the
   README now says so.
@@ -248,7 +248,7 @@ Includes one behavioral change (see below).
   pandas/sklearn major bumps. Current dev versions remain in-range. (#11)
 - Demo `examples/leakage_demo.py` no longer slices the exception
   message via `str(exc).splitlines()[N][:110]`. Now uses
-  `str(exc)[:200]` — decouples the demo output from `_checks.py`
+  `str(exc)[:200]` - decouples the demo output from `_checks.py`
   exception-message line structure. (#13)
 - `examples/leakage_demo.ipynb` honest-path cell now operates on
   `df_honest = df.copy()` so the leaky-path cell can be re-run
