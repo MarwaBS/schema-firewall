@@ -14,7 +14,7 @@ pytest
 ```
 
 Expected: the full suite passes in under 20 seconds. (No fixed count here on
-purpose — it drifts every time a test is added; `pytest` reports the current
+purpose - it drifts every time a test is added; `pytest` reports the current
 number.)
 
 To also run static analysis (the same commands CI runs):
@@ -26,7 +26,7 @@ mypy src tests
 ```
 
 Both should be green on `main`. If they aren't on a fresh checkout,
-that's a real bug — please open an issue.
+that's a real bug - please open an issue.
 
 ## Running the demo
 
@@ -43,17 +43,17 @@ will fail in CI before review.
 
 Bug reports, feature requests, and questions all go to
 [GitHub Issues](https://github.com/MarwaBS/schema-firewall/issues).
-For security-sensitive reports, see `SECURITY.md` — those route
+For security-sensitive reports, see `SECURITY.md` - those route
 through GitHub Security Advisories, not the public issue tracker.
 
-## Scope contract — the minimalism lock
+## Scope contract - the minimalism lock
 
 The README states the lock explicitly:
 
 > Three checks. One contract class. Four exceptions. That's the whole library.
 
-Pull requests that add to the public API surface — a fourth `check_*`
-function, a second contract dataclass, a fifth exception type — will
+Pull requests that add to the public API surface - a fourth `check_*`
+function, a second contract dataclass, a fifth exception type - will
 be rejected on principle, not on quality. The public surface is locked at
 this shape so users can audit the entire surface in 5 minutes.
 
