@@ -17,13 +17,13 @@ pip install schema-firewall
 
 ## The problem
 
-In the last five years, published and competition-grade ML systems have repeatedly shipped with one of these three bugs:
+Published and competition-grade ML systems have shipped with each of these three bugs:
 
 | Bug | Real example | Impact |
 |---|---|---|
-| **Feature statistically mirrors the target** | [COVID-19 chest X-ray classifiers learned hospital-ID confounders](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0274098), not pulmonary features | Internal AUC 0.99, external-hospital AUC near-chance |
-| **Forbidden / post-outcome feature in the input** | [JAMA Network Open 2024](https://jamanetwork.com/journals/jamanetworkopen/fullarticle/2843179): 40.2% of MIMIC same-admission prediction studies fed in ICD codes finalised at discharge | AUROC 0.97 from leaky codes alone |
-| **Transform that reads across the whole dataset** | [Kaggle Santander 2019 "magic" leak](https://www.kaggle.com/c/santander-customer-transaction-prediction/discussion/84614): frequency features computed on (train ∪ real-test) | Public AUC jumped 0.90 → 0.92 |
+| **Feature statistically mirrors the target** | [COVID-19 chest X-ray classifiers relied on confounding factors rather than pathology](https://doi.org/10.1038/s42256-021-00338-7) | Looked accurate, failed when tested at new hospitals |
+| **Forbidden / post-outcome feature in the input** | [JAMA Network Open 2025](https://jamanetwork.com/journals/jamanetworkopen/fullarticle/2843179): 40.2% of MIMIC same-admission prediction studies fed in ICD codes finalised at discharge | AUROC 0.97 from leaky codes alone |
+| **Transform that reads across the whole dataset** | [Connectome prediction models with feature selection fitted before the train/test split](https://doi.org/10.1038/s41467-024-46150-w) | Feature-selection leakage drastically inflated prediction performance |
 
 Each one escaped peer review, code review, or competition scrutiny - because the bug isn't a type error. It's a statistical / semantic contract violation.
 
@@ -88,7 +88,7 @@ If you've ever applied `.mean()`, `.value_counts()`, `TargetEncoder`, or ComBat/
 
 ## Verified invariants under execution
 
-The library is consumed in downstream CI today as a pinned dep of [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor). The flagship's `External Benchmark` CI job re-checks these invariants against the published wheel on a weekly schedule and on pushes/PRs touching the benchmark's paths (the job is path-filtered):
+Each invariant below is exercised by this repo's own CI. Downstream, [`nyc-real-estate-predictor`](https://github.com/MarwaBS/nyc-real-estate-predictor) pins `0.1.3` and calls only `check_leakage` and `check_schema` (see the note at the top), so its benchmark does not re-run the stateless or determinism checks:
 
 - **Statistical leakage detection triggers on the bundled California housing demo.** Build a target-mean-encoded feature on rounded lat/lon buckets - Ridge regression returns R² = 0.9495 (leaky). Apply the same target encoding per train fold only - R² collapses to 0.4384 (honest). Both `check_leakage` and `check_stateless` raise on the leaky pipeline. Reproducible in 60 seconds via [`examples/leakage_demo.ipynb`](examples/leakage_demo.ipynb).
 
@@ -96,7 +96,7 @@ The library is consumed in downstream CI today as a pinned dep of [`nyc-real-est
 
 - **Forbidden-column gate raises on the documented set.** `nyc-real-estate-predictor` configures `SchemaContract(forbidden_columns=frozenset({"SALE PRICE", "SALE DATE", "PRICE_PER_SQFT", "TARGET", "log_price"}))`. Verifiable from this repo: the parametrized `tests/test_checks.py::test_schema_rejects_forbidden_column` asserts `check_schema` raises on each of those names. The flagship additionally re-validates the integration in its own CI (see the downstream-usage note above); its internal test suite is that repo's claim, not verified here.
 
-- **Determinism check catches non-deterministic transforms.** Two consecutive `pipeline_fn(raw)` calls must produce identical frames. Unseeded random initialisation, dict-order dependency, and side-effecting transforms all fail. Internal `pd.testing.assert_frame_equal` with `check_exact=True`, so a perturbation below pandas' default 1e-5 relative tolerance still fails rather than passing as "close enough".
+- **Determinism check catches non-deterministic transforms.** Two consecutive `pipeline_fn(raw)` calls must produce identical frames. An unseeded random draw fails (`tests/test_checks.py::test_stateless_catches_nondeterministic_pipeline`). Both calls run in one process, so ordering that changes only between processes, such as set iteration under a different `PYTHONHASHSEED`, is not caught. Internal `pd.testing.assert_frame_equal` with `check_exact=True`, so a perturbation below pandas' default 1e-5 relative tolerance still fails rather than passing as "close enough".
 
 These hold across the test matrix; numbers (test counts, coverage %) age - the invariants don't.
 
@@ -155,20 +155,13 @@ What this establishes: each of the 20 registered failure modes has at least one 
 
 ---
 
-## What it caught in downstream usage
-
-The `schema-firewall` checks are the same ones used by the [NYC Real Estate Predictor external benchmark](https://github.com/MarwaBS/nyc-real-estate-predictor) against NYC.gov 2024 Rolling Sales data. The flagship benchmark uses `schema-firewall` as a dependency, not a vendored copy. When the library breaks, the benchmark breaks. This is by design.
-
----
-
 ## Attribution
 
 Extracted from the firewall layer of the NYC Real Estate Predictor's external benchmark. The scoring-determinism pattern comes from the Protocol-based core of the Job Decision Engine project. Credit for the underlying problem classes goes to:
 
 - DeGrave et al. (*Nature Machine Intelligence*, 2021) - COVID X-ray shortcut learning
 - Rosenblatt et al. (*Nature Communications*, 2024) - connectome leakage
-- Ramadan et al. (*JAMIA*, 2024) - clinical label-leakage framework
-- YaG320 - Santander "magic" competition kernel
+- Ramadan et al. (*JAMA Network Open*, 2025) - ICD-code label leakage in MIMIC
 
 ---
 

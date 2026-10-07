@@ -179,7 +179,7 @@ REGISTRY: tuple[PlantedDefect, ...] = (
     PlantedDefect(
         defect_id="determinism-check-disabled",
         check="check_stateless",
-        failure_mode="non-deterministic transform (unseeded random, dict-order dependency)",
+        failure_mode="non-deterministic transform (unseeded random draw)",
         doc_file="README.md",
         doc_anchor="Determinism check catches non-deterministic transforms.",
         target_file=_CHECKS,
