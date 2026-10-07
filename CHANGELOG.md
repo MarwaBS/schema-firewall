@@ -69,9 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `check_stateless` default spot-check samples every numeric column's min/max
-  tail rows again. 0.2.0 silently narrowed the tail sampling to the 20
-  highest-variance columns on frames wider than that -- an undocumented change
-  that re-opened the tail fail-open the 0.1.3 entry reports closed. A cross-row
+  tail rows again. 0.2.0 narrowed the tail sampling to the 20
+  highest-variance columns on frames wider than that, a change the 0.2.0
+  changelog did not record. The narrowing re-opened the tail fail-open the
+  0.1.3 entry reports closed. A cross-row
   edit on a low-variance column (e.g. a standardised or robust-scaled column,
   variance ~1) was evicted from the sample and missed on ~18 of 20 seeds on a
   26-column frame. Variance ranking is scale-dependent, so the columns those
@@ -206,8 +207,8 @@ regression test.
 ### Docs
 - README "Default samples five spread indices" corrected - it described the
   pre-0.1.3 stride-only sampler. `check_stateless` now spot-checks each numeric
-  column's min/max row, every NaN-bearing row, and a fixed-stride spread; the
-  README now says so.
+  column's min/max row, the first 10 rows holding a NaN in any column, and a
+  fixed-stride spread; the README now says so.
 - README LoC figure refreshed to the verified current count (372 code / 515
   raw) with a one-line reproduce command, so the "≤ 500 LoC" budget claim can't
   silently rot again.
@@ -225,48 +226,48 @@ Includes one behavioral change (see below).
   classification targets (3-class balanced y, N=200). Asserts the
   function passes on independent features and raises `LeakageError`
   on a target-copy feature. Closes the bug class that motivated
-  a finding retracted during internal review. (#5)
+  a finding retracted during internal review.
 - Regression test asserting `check_stateless` raises `ValueError` when
-  a `sample_indices` entry is not in `raw.index`. (#9)
+  a `sample_indices` entry is not in `raw.index`.
 - `CONTRIBUTING.md` at repo root: test-suite invocation, demo
   invocation, issue routing, the minimalism-lock as a contribution
-  constraint, ASCII-source style note. (#25)
+  constraint, ASCII-source style note.
 
 ### Changed
 - `_safe_corr` method parameter is now `Literal["pearson", "spearman"]`
   rather than `str`, so mypy catches typo'd call sites at
   static-analysis time. Runtime `ValueError` message tightened to
   quote the bogus method and list valid options for the residual
-  untyped-caller case. (#27)
+  untyped-caller case.
 - `mutual_info_regression` import moved from inside `check_leakage`
   to the module-level imports of `_checks.py`. scikit-learn is a hard
   dependency; the function-local form saved no install cost and added
-  an indirection per call. (#20)
+  an indirection per call.
 - `pyproject.toml` runtime dependencies gained upper bounds:
   `numpy>=1.24,<3.0`, `pandas>=2.0,<3.0`, `scikit-learn>=1.3,<2.0`.
   Protects downstream users from numpy 2.x ABI breaks and future
-  pandas/sklearn major bumps. Current dev versions remain in-range. (#11)
+  pandas/sklearn major bumps. Current dev versions remain in-range.
 - Demo `examples/leakage_demo.py` no longer slices the exception
   message via `str(exc).splitlines()[N][:110]`. Now uses
   `str(exc)[:200]` - decouples the demo output from `_checks.py`
-  exception-message line structure. (#13)
+  exception-message line structure.
 - `examples/leakage_demo.ipynb` honest-path cell now operates on
   `df_honest = df.copy()` so the leaky-path cell can be re-run
-  without contamination from a previously-executed honest cell. (#14)
+  without contamination from a previously-executed honest cell.
 - README hostile-input-test count: 27 -> 30 (verified via
   `pytest --collect-only -q`).
 
 ### Fixed
 - `examples/leakage_demo.ipynb` is now committed with executed
   outputs. GitHub renders the demo's R^2 narrative inline
-  (leaky=0.9495 / honest=0.4384 / gap=+0.5111). (#21)
+  (leaky=0.9495 / honest=0.4384 / gap=+0.5111).
 
 ### Behavioral changes
 - `check_stateless` raises `ValueError` on unknown `sample_indices`
   entries, rather than silently skipping them. Previous behavior
   let a caller's typo result in zero actual spot-checks and a
   vacuous "pass". Callers who pass `sample_indices` should verify
-  every index is in `raw.index`. (#9)
+  every index is in `raw.index`.
 
 ## [0.1.1] - 2026-05-23
 
@@ -339,5 +340,5 @@ Includes one behavioral change (see below).
 [0.2.0]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MarwaBS/schema-firewall/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/MarwaBS/schema-firewall/compare/ef5021df74e030cf90073d77089f9839677a154a...v0.1.1
-[0.1.0]: https://github.com/MarwaBS/schema-firewall/tree/ef5021df74e030cf90073d77089f9839677a154a
+[0.1.1]: https://github.com/MarwaBS/schema-firewall/compare/71e11f7...v0.1.1
+[0.1.0]: https://github.com/MarwaBS/schema-firewall/tree/71e11f7
