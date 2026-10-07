@@ -325,11 +325,12 @@ def check_stateless(
 
     Catches:
 
-    - Santander-style frequency encoding across (train union test).
+    - Frequency encoding fitted on train and test together.
     - Target encoding fit on full data instead of per-fold.
     - ComBat / global normalisation applied outside cross-validation.
-    - Any non-deterministic transform (unseeded random, dict-order
-      dependency, etc.).
+    - A transform that differs between two calls in one process, such as
+      an unseeded random draw. Ordering that changes only between processes
+      (set iteration under a different PYTHONHASHSEED) is not seen.
 
     Args:
         pipeline_fn: callable that takes a frame and returns a frame.
